@@ -4,6 +4,7 @@ use std::{
 };
 
 use anyhow::Context;
+use bytes::buf;
 
 use crate::{
     command_parser::CommandParser,
@@ -34,16 +35,21 @@ impl Server {
     }
 
     fn handle_request(&self, stream: &mut TcpStream) -> Result<(), Error> {
-        let commands = read_from_tcp_stream(stream)?;
+        loop {
+            let commands = read_from_tcp_stream(stream)?;
+            if commands.is_empty() {
+                break;
+            }
 
-        for command in commands {
-            match self.command_parser.parse(&command) {
-                Some(Command::Ping) => {
-                    stream
-                        .write_all(b"+PONG\r\n")
-                        .context("write-back-to-stream-at-ping")?;
+            for command in commands {
+                match self.command_parser.parse(&command) {
+                    Some(Command::Ping) => {
+                        stream
+                            .write_all(b"+PONG\r\n")
+                            .context("write-back-to-stream-at-ping")?;
+                    }
+                    None => error!("Unknown command: {}", command),
                 }
-                None => error!("Unknown command: {}", command),
             }
         }
 

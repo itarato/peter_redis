@@ -48,6 +48,8 @@ pub(crate) fn read_number_from_tcp_stream(
     let buf = buf.trim();
     if buf.starts_with(prefix) {
         Ok(usize::from_str_radix(&buf[prefix.len()..], 10).context("parse-number")?)
+    } else if buf.is_empty() {
+        return Ok(0);
     } else {
         Err(format!(
             "Unexpected line. Expected to start with {}, got: {}.",
