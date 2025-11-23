@@ -1,17 +1,28 @@
 #![allow(unused_imports)]
 use std::net::TcpListener;
 
-fn main() {
-    let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
+extern crate pretty_env_logger;
+#[macro_use]
+extern crate log;
 
-    for stream in listener.incoming() {
-        match stream {
-            Ok(_stream) => {
-                println!("accepted new connection");
-            }
-            Err(e) => {
-                println!("error: {}", e);
-            }
-        }
-    }
+mod command_parser;
+mod commands;
+mod common;
+mod server;
+
+use log::info;
+
+use crate::{common::Error, server::*};
+
+fn main() -> Result<(), Error> {
+    pretty_env_logger::init();
+
+    info!("Peter-Redis starting");
+
+    let server = Server::new();
+    server.run()?;
+
+    info!("Peter-Redis ending");
+
+    Ok(())
 }
