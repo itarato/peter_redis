@@ -1,10 +1,8 @@
-use std::{
-    io::{Read, Write},
+use anyhow::Context;
+use tokio::{
+    io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
 };
-
-use anyhow::Context;
-use bytes::buf;
 
 use crate::{
     command_parser::CommandParser,
@@ -12,40 +10,42 @@ use crate::{
     common::{read_from_tcp_stream, Error},
 };
 
-pub(crate) struct Server {
-    command_parser: CommandParser,
-}
+pub(crate) struct Server {}
 
 impl Server {
     pub(crate) fn new() -> Self {
-        Self {
-            command_parser: CommandParser::new(),
-        }
+        Self {}
     }
 
-    pub(crate) fn run(&self) -> Result<(), Error> {
-        let listener = TcpListener::bind("127.0.0.1:6379").context("tcp-bind")?;
+    pub(crate) async fn run(&self) -> Result<(), Error> {
+        let listener = TcpListener::bind("127.0.0.1:6379")
+            .await
+            .context("tcp-bind")?;
 
-        for stream in listener.incoming() {
-            let mut stream = stream.context("incoming-stream")?;
-            self.handle_request(&mut stream)?;
-        }
-
-        Ok(())
-    }
-
-    fn handle_request(&self, stream: &mut TcpStream) -> Result<(), Error> {
         loop {
-            let commands = read_from_tcp_stream(stream)?;
+            let (stream, _) = listener.accept().await.context("accept-tcp-connection")?;
+            tokio::spawn(async move {
+                match Self::handle_request(stream).await {
+                    Ok(_) => debug!("Request completed"),
+                    Err(err) => error!("Request has failed with reason: {}", err),
+                }
+            });
+        }
+    }
+
+    async fn handle_request(mut stream: TcpStream) -> Result<(), Error> {
+        loop {
+            let commands = read_from_tcp_stream(&mut stream).await?;
             if commands.is_empty() {
                 break;
             }
 
             for command in commands {
-                match self.command_parser.parse(&command) {
+                match CommandParser::parse(&command) {
                     Some(Command::Ping) => {
                         stream
                             .write_all(b"+PONG\r\n")
+                            .await
                             .context("write-back-to-stream-at-ping")?;
                     }
                     None => error!("Unknown command: {}", command),

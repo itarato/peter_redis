@@ -1,23 +1,22 @@
-use std::{
-    io::{BufRead, BufReader, Read},
-    net::TcpStream,
-};
-
 use anyhow::Context;
+use tokio::io::AsyncBufReadExt;
+use tokio::io::BufReader;
+use tokio::net::TcpStream;
 
 pub(crate) type Error = Box<dyn std::error::Error + Send + Sync>;
 
-pub(crate) fn read_from_tcp_stream(stream: &mut TcpStream) -> Result<Vec<String>, Error> {
-    let mut buf_reader = std::io::BufReader::new(stream);
+pub(crate) async fn read_from_tcp_stream(stream: &mut TcpStream) -> Result<Vec<String>, Error> {
+    let mut buf_reader = BufReader::new(stream);
 
-    let command_count = read_number_from_tcp_stream(&mut buf_reader, "*")?;
+    let command_count = read_number_from_tcp_stream(&mut buf_reader, "*").await?;
     debug!("Incoming command count: {}", command_count);
 
     let mut cmds = vec![];
 
     for _ in 0..command_count {
-        let len = read_number_from_tcp_stream(&mut buf_reader, "$")?;
-        let cmd = read_line_from_tcp_stream(&mut buf_reader)?
+        let len = read_number_from_tcp_stream(&mut buf_reader, "$").await?;
+        let cmd = read_line_from_tcp_stream(&mut buf_reader)
+            .await?
             .trim()
             .to_string();
 
@@ -38,12 +37,15 @@ pub(crate) fn read_from_tcp_stream(stream: &mut TcpStream) -> Result<Vec<String>
     Ok(cmds)
 }
 
-pub(crate) fn read_number_from_tcp_stream(
+pub(crate) async fn read_number_from_tcp_stream(
     buf_reader: &mut BufReader<&mut TcpStream>,
     prefix: &str,
 ) -> Result<usize, Error> {
     let mut buf = String::new();
-    buf_reader.read_line(&mut buf).context("number-read")?;
+    buf_reader
+        .read_line(&mut buf)
+        .await
+        .context("number-read")?;
 
     let buf = buf.trim();
     if buf.starts_with(prefix) {
@@ -59,10 +61,13 @@ pub(crate) fn read_number_from_tcp_stream(
     }
 }
 
-pub(crate) fn read_line_from_tcp_stream(
+pub(crate) async fn read_line_from_tcp_stream(
     buf_reader: &mut BufReader<&mut TcpStream>,
 ) -> Result<String, Error> {
     let mut buf = String::new();
-    buf_reader.read_line(&mut buf).context("number-read")?;
+    buf_reader
+        .read_line(&mut buf)
+        .await
+        .context("number-read")?;
     Ok(buf)
 }

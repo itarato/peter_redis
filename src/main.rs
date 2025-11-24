@@ -1,6 +1,3 @@
-#![allow(unused_imports)]
-use std::net::TcpListener;
-
 extern crate pretty_env_logger;
 #[macro_use]
 extern crate log;
@@ -14,13 +11,14 @@ use log::info;
 
 use crate::{common::Error, server::*};
 
-fn main() -> Result<(), Error> {
+#[tokio::main]
+async fn main() -> Result<(), Error> {
     pretty_env_logger::init();
 
     info!("Peter-Redis starting");
 
     let server = Server::new();
-    server.run()?;
+    server.run().await?;
 
     info!("Peter-Redis ending");
 
