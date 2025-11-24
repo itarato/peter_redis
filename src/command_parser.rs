@@ -1,6 +1,6 @@
 use crate::commands::Command;
 
-pub(crate) struct CommandParser {}
+pub(crate) struct CommandParser;
 
 impl CommandParser {
     pub(crate) fn parse(raw: &str) -> Option<Command> {
