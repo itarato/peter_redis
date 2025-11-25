@@ -1,23 +1,26 @@
+use std::sync::Arc;
+
 use anyhow::Context;
 use tokio::{
     io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
+    sync::Mutex,
 };
 
 use crate::{
+    command_parser::CommandParser,
     common::{read_from_tcp_stream, Error},
-    // engine::Engine,
-    resp::RespValue,
+    engine::Engine,
 };
 
 pub(crate) struct Server {
-    // engine: Engine,
+    engine: Arc<Mutex<Engine>>,
 }
 
 impl Server {
     pub(crate) fn new() -> Self {
         Self {
-            // engine: Engine::new(),
+            engine: Arc::new(Mutex::new(Engine::new())),
         }
     }
 
@@ -28,43 +31,38 @@ impl Server {
 
         loop {
             let (stream, _) = listener.accept().await.context("accept-tcp-connection")?;
-            tokio::spawn(async move {
-                match Self::handle_request(stream).await {
-                    Ok(_) => debug!("Request completed"),
-                    Err(err) => error!("Request has failed with reason: {}", err),
+            tokio::spawn({
+                let engine = self.engine.clone();
+
+                async move {
+                    match Self::handle_request(stream, engine).await {
+                        Ok(_) => debug!("Request completed"),
+                        Err(err) => error!("Request has failed with reason: {}", err),
+                    }
                 }
             });
         }
     }
 
-    async fn handle_request(mut stream: TcpStream) -> Result<(), Error> {
+    async fn handle_request(
+        mut stream: TcpStream,
+        engine: Arc<Mutex<Engine>>,
+    ) -> Result<(), Error> {
         loop {
             match read_from_tcp_stream(&mut stream).await? {
-                Some(payload) => Self::handle_payload(payload, &mut stream).await?,
+                Some(input) => match CommandParser::parse(&input) {
+                    Some(command) => {
+                        let result = engine.lock().await.execute(&command)?;
+                        stream
+                            .write_all(result.serialize().as_bytes())
+                            .await
+                            .context("write-simple-value-back-to-stream")?;
+                    }
+                    None => {
+                        return Err(format!("Cannot parse command from input: {:#?}", input).into())
+                    }
+                },
                 None => break,
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn handle_payload(payload: RespValue, stream: &mut TcpStream) -> Result<(), Error> {
-        match payload {
-            RespValue::SimpleString(s) => unimplemented!(),
-            RespValue::BulkString(s) => {
-                if s == "PING" {
-                    stream
-                        .write_all(b"+PONG\r\n")
-                        .await
-                        .context("write-back-to-stream-at-ping")?;
-                } else {
-                    unimplemented!()
-                }
-            }
-            RespValue::Array(items) => {
-                for item in items {
-                    Box::pin(Self::handle_payload(item, stream)).await?;
-                }
             }
         }
 

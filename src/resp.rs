@@ -1,3 +1,4 @@
+#[derive(Debug, Clone)]
 pub(crate) enum RespValue {
     SimpleString(String),
     BulkString(String),
@@ -17,6 +18,13 @@ impl RespValue {
                     .collect::<Vec<_>>()
                     .join("")
             ),
+        }
+    }
+
+    pub(crate) fn as_string(&self) -> Option<&String> {
+        match self {
+            Self::BulkString(s) | Self::SimpleString(s) => Some(s),
+            _ => None,
         }
     }
 }
