@@ -3,65 +3,60 @@ use tokio::io::AsyncBufReadExt;
 use tokio::io::BufReader;
 use tokio::net::TcpStream;
 
+use crate::resp::RespValue;
+
 pub(crate) type Error = Box<dyn std::error::Error + Send + Sync>;
 
-pub(crate) async fn read_from_tcp_stream(stream: &mut TcpStream) -> Result<Vec<String>, Error> {
+pub(crate) async fn read_from_tcp_stream(
+    stream: &mut TcpStream,
+) -> Result<Option<RespValue>, Error> {
     let mut buf_reader = BufReader::new(stream);
+    read_resp_value(&mut buf_reader).await
+}
 
-    let command_count = read_number_from_tcp_stream(&mut buf_reader, "*").await?;
-    debug!("Incoming command count: {}", command_count);
+async fn read_resp_value(
+    buf_reader: &mut BufReader<&mut TcpStream>,
+) -> Result<Option<RespValue>, Error> {
+    let line = read_line_from_tcp_stream(buf_reader).await?;
 
-    let mut cmds = vec![];
+    if line.is_empty() {
+        return Ok(None);
+    } else if line.starts_with("+") {
+        return Ok(Some(RespValue::SimpleString(line[1..].trim().to_string())));
+    } else if line.starts_with("$") {
+        let bulk_str_len = usize::from_str_radix(&line[1..].trim(), 10).context("parse-number")?;
 
-    for _ in 0..command_count {
-        let len = read_number_from_tcp_stream(&mut buf_reader, "$").await?;
-        let cmd = read_line_from_tcp_stream(&mut buf_reader)
-            .await?
-            .trim()
-            .to_string();
+        let next_line = read_line_from_tcp_stream(buf_reader).await?;
 
-        debug!("Reading command: '{}' of len '{}'", cmd, len);
-
-        if cmd.len() != len {
-            error!(
-                "Command len mismatch. Expected {}, got {}. Line: {}",
-                len,
-                cmd.len(),
-                &cmd
-            );
+        if next_line.trim().len() != bulk_str_len {
+            return Err(format!(
+                "Bulk string len mismatch. Expected {}, got {}. Bulk string: {}",
+                bulk_str_len,
+                next_line.len(),
+                &next_line
+            )
+            .into());
         }
 
-        cmds.push(cmd);
+        return Ok(Some(RespValue::BulkString(next_line.trim().to_string())));
+    } else if line.starts_with("*") {
+        let array_len = usize::from_str_radix(&line[1..].trim(), 10).context("parse-number")?;
+        let mut items = vec![];
+
+        for _ in 0..array_len {
+            match Box::pin(read_resp_value(buf_reader)).await? {
+                Some(item) => items.push(item),
+                None => return Err("Missing array item".into()),
+            }
+        }
+
+        return Ok(Some(RespValue::Array(items)));
     }
 
-    Ok(cmds)
+    Err(format!("Unexpected incoming RESP string from connection: {}", line).into())
 }
 
-pub(crate) async fn read_number_from_tcp_stream(
-    buf_reader: &mut BufReader<&mut TcpStream>,
-    prefix: &str,
-) -> Result<usize, Error> {
-    let mut buf = String::new();
-    buf_reader
-        .read_line(&mut buf)
-        .await
-        .context("number-read")?;
-
-    let buf = buf.trim();
-    if buf.starts_with(prefix) {
-        Ok(usize::from_str_radix(&buf[prefix.len()..], 10).context("parse-number")?)
-    } else if buf.is_empty() {
-        return Ok(0);
-    } else {
-        Err(format!(
-            "Unexpected line. Expected to start with {}, got: {}.",
-            prefix, buf
-        )
-        .into())
-    }
-}
-
-pub(crate) async fn read_line_from_tcp_stream(
+async fn read_line_from_tcp_stream(
     buf_reader: &mut BufReader<&mut TcpStream>,
 ) -> Result<String, Error> {
     let mut buf = String::new();

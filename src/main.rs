@@ -5,6 +5,8 @@ extern crate log;
 mod command_parser;
 mod commands;
 mod common;
+mod engine;
+mod resp;
 mod server;
 
 use log::info;
