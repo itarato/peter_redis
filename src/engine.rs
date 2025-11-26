@@ -15,8 +15,8 @@ impl Engine {
         match command {
             Command::Ping => Ok(RespValue::SimpleString("PONG".to_string())),
             Command::Echo(arg) => Ok(arg.clone()),
-            Command::Set(key, value) => {
-                self.db.set(key.clone(), value.clone());
+            Command::Set(key, value, expiry) => {
+                self.db.set(key.clone(), value.clone(), expiry.clone());
                 Ok(RespValue::SimpleString("OK".into()))
             }
             Command::Get(key) => match self.db.get(key) {

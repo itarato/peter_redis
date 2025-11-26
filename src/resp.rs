@@ -3,6 +3,7 @@ pub(crate) enum RespValue {
     SimpleString(String),
     BulkString(String),
     Array(Vec<RespValue>),
+    Integer(i64),
     Null,
 }
 
@@ -20,6 +21,7 @@ impl RespValue {
                     .join("")
             ),
             Self::Null => "$-1\r\n".into(),
+            Self::Integer(n) => format!(":{}\r\n", n),
         }
     }
 
@@ -66,5 +68,10 @@ mod test {
             ])
             .serialize()
         );
+    }
+
+    #[test]
+    fn test_integer() {
+        assert_eq!(":100\r\n", RespValue::Integer(100).serialize().to_string());
     }
 }
