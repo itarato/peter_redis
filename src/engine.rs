@@ -36,6 +36,16 @@ impl Engine {
                     Err(err) => Ok(RespValue::SimpleError(err)),
                 }
             }
+
+            Command::LRange(key, start, end) => match self.db.get_list_lrange(key, *start, *end) {
+                Ok(array) => Ok(RespValue::Array(
+                    array
+                        .into_iter()
+                        .map(|elem| RespValue::BulkString(elem))
+                        .collect::<Vec<_>>(),
+                )),
+                Err(err) => Ok(RespValue::SimpleError(err)),
+            },
         }
     }
 }

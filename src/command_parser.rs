@@ -89,6 +89,29 @@ impl CommandParser {
                         return Ok(Command::Rpush(key.clone(), values));
                     }
 
+                    if name.to_lowercase() == "lrange" {
+                        if items.len() != 4 {
+                            return Err("ERR wrong number of arguments for 'lrange' command".into());
+                        }
+                        let Some(key) = items[1].as_string() else {
+                            return Err("ERR wrong key for 'lrange' command".into());
+                        };
+                        let Some(start_raw) = items[2].as_string() else {
+                            return Err("ERR wrong left range for 'lrange' command".into());
+                        };
+                        let Some(end_raw) = items[3].as_string() else {
+                            return Err("ERR wrong right range for 'lrange' command".into());
+                        };
+                        let Ok(start) = i64::from_str_radix(&start_raw, 10) else {
+                            return Err("ERR wrong left range value for 'lrange' command".into());
+                        };
+                        let Ok(end) = i64::from_str_radix(&end_raw, 10) else {
+                            return Err("ERR wrong right range value for 'lrange' command".into());
+                        };
+
+                        return Ok(Command::LRange(key.clone(), start, end));
+                    }
+
                     return Err(format!("ERR unknown command '{}'", name.to_lowercase()));
                 } else {
                     return Err("ERR wrong command type".into());
