@@ -126,6 +126,12 @@ impl Database {
             start
         };
 
+        let end = if end < 0 {
+            (end + array.len() as i64).max(0)
+        } else {
+            end
+        };
+
         let mut out = vec![];
         for i in start..=end {
             if i >= array.len() as i64 {
