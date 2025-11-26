@@ -5,6 +5,7 @@ pub(crate) enum RespValue {
     Array(Vec<RespValue>),
     Integer(i64),
     Null,
+    SimpleError(String),
 }
 
 impl RespValue {
@@ -22,6 +23,7 @@ impl RespValue {
             ),
             Self::Null => "$-1\r\n".into(),
             Self::Integer(n) => format!(":{}\r\n", n),
+            Self::SimpleError(s) => format!("-{}\r\n", s),
         }
     }
 
@@ -73,5 +75,13 @@ mod test {
     #[test]
     fn test_integer() {
         assert_eq!(":100\r\n", RespValue::Integer(100).serialize().to_string());
+    }
+
+    #[test]
+    fn test_simple_error() {
+        assert_eq!(
+            "-ERR Bad code\r\n".to_string(),
+            RespValue::SimpleError("ERR Bad code".to_string()).serialize()
+        );
     }
 }

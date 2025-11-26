@@ -14,15 +14,28 @@ impl Engine {
     pub(crate) fn execute(&mut self, command: &Command) -> Result<RespValue, Error> {
         match command {
             Command::Ping => Ok(RespValue::SimpleString("PONG".to_string())),
+
             Command::Echo(arg) => Ok(arg.clone()),
+
             Command::Set(key, value, expiry) => {
-                self.db.set(key.clone(), value.clone(), expiry.clone());
-                Ok(RespValue::SimpleString("OK".into()))
+                match self.db.set(key.clone(), value.clone(), expiry.clone()) {
+                    Ok(_) => Ok(RespValue::SimpleString("OK".into())),
+                    Err(err) => Ok(RespValue::SimpleError(err)),
+                }
             }
+
             Command::Get(key) => match self.db.get(key) {
-                Some(v) => Ok(v.clone()),
-                None => Ok(RespValue::Null),
+                Ok(Some(v)) => Ok(RespValue::BulkString(v.clone())),
+                Ok(None) => Ok(RespValue::Null),
+                Err(err) => Ok(RespValue::SimpleError(err)),
             },
+
+            Command::Rpush(key, values) => {
+                match self.db.push_to_array(key.clone(), values.clone()) {
+                    Ok(count) => Ok(RespValue::Integer(count as i64)),
+                    Err(err) => Ok(RespValue::SimpleError(err)),
+                }
+            }
         }
     }
 }

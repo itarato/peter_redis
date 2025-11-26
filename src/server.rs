@@ -11,6 +11,7 @@ use crate::{
     command_parser::CommandParser,
     common::{read_from_tcp_stream, Error},
     engine::Engine,
+    resp::RespValue,
 };
 
 pub(crate) struct Server {
@@ -51,15 +52,18 @@ impl Server {
         loop {
             match read_from_tcp_stream(&mut stream).await? {
                 Some(input) => match CommandParser::parse(&input) {
-                    Some(command) => {
+                    Ok(command) => {
                         let result = engine.lock().await.execute(&command)?;
                         stream
                             .write_all(result.serialize().as_bytes())
                             .await
                             .context("write-simple-value-back-to-stream")?;
                     }
-                    None => {
-                        return Err(format!("Cannot parse command from input: {:#?}", input).into())
+                    Err(err) => {
+                        stream
+                            .write_all(RespValue::SimpleError(err).serialize().as_bytes())
+                            .await
+                            .context("write-simple-value-back-to-stream")?;
                     }
                 },
                 None => break,

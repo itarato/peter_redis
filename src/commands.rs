@@ -4,6 +4,7 @@ use crate::resp::RespValue;
 pub(crate) enum Command {
     Ping,
     Echo(RespValue),
-    Set(String, RespValue, Option<u128>),
+    Set(String, String, Option<u128>),
     Get(String),
+    Rpush(String, Vec<String>),
 }
