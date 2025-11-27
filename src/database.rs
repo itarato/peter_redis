@@ -171,7 +171,21 @@ impl Database {
         Ok(out)
     }
 
-    fn assert_array(&self, key: &String) -> Result<(), String> {
+    pub(crate) fn list_length(&self, key: &str) -> Result<usize, String> {
+        self.assert_array(key)?;
+
+        if !self.dict.contains_key(key) {
+            return Ok(0);
+        }
+
+        let Entry::Array(array) = self.dict.get(key).unwrap() else {
+            unreachable!();
+        };
+
+        Ok(array.len())
+    }
+
+    fn assert_array(&self, key: &str) -> Result<(), String> {
         if self.dict.contains_key(key) {
             if !self.dict.get(key).map(|v| v.is_array()).unwrap() {
                 return Err(

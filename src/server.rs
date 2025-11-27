@@ -51,7 +51,7 @@ impl Server {
     ) -> Result<(), Error> {
         loop {
             match read_from_tcp_stream(&mut stream).await? {
-                Some(input) => match CommandParser::parse(&input) {
+                Some(input) => match CommandParser::parse(input) {
                     Ok(command) => {
                         let result = engine.lock().await.execute(&command)?;
                         stream

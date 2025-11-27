@@ -15,7 +15,7 @@ impl Engine {
         match command {
             Command::Ping => Ok(RespValue::SimpleString("PONG".to_string())),
 
-            Command::Echo(arg) => Ok(arg.clone()),
+            Command::Echo(arg) => Ok(RespValue::BulkString(arg.clone())),
 
             Command::Set(key, value, expiry) => {
                 match self.db.set(key.clone(), value.clone(), expiry.clone()) {
@@ -44,13 +44,18 @@ impl Engine {
                 }
             }
 
-            Command::LRange(key, start, end) => match self.db.get_list_lrange(key, *start, *end) {
+            Command::Lrange(key, start, end) => match self.db.get_list_lrange(key, *start, *end) {
                 Ok(array) => Ok(RespValue::Array(
                     array
                         .into_iter()
                         .map(|elem| RespValue::BulkString(elem))
                         .collect::<Vec<_>>(),
                 )),
+                Err(err) => Ok(RespValue::SimpleError(err)),
+            },
+
+            Command::Llen(key) => match self.db.list_length(key) {
+                Ok(n) => Ok(RespValue::Integer(n as i64)),
                 Err(err) => Ok(RespValue::SimpleError(err)),
             },
         }

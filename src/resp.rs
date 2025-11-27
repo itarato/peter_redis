@@ -33,6 +33,13 @@ impl RespValue {
             _ => None,
         }
     }
+
+    pub(crate) fn as_string_owned(self) -> Option<String> {
+        match self {
+            Self::BulkString(s) | Self::SimpleString(s) => Some(s),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]

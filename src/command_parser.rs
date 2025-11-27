@@ -1,16 +1,25 @@
+use std::vec;
+
 use crate::{commands::Command, resp::RespValue};
+
+macro_rules! to_number {
+    ($t:ident, $v:expr, $name:literal) => {
+        $t::from_str_radix($v, 10)
+            .map_err(|_| format!("ERR wrong value for '{}' command", $name))?
+    };
+}
 
 pub(crate) struct CommandParser;
 
 impl CommandParser {
-    pub(crate) fn parse(input: &RespValue) -> Result<Command, String> {
+    pub(crate) fn parse(input: RespValue) -> Result<Command, String> {
         match input {
             RespValue::Array(items) => {
                 if items.is_empty() {
                     return Err("ERR missing command".into());
                 }
 
-                if let Some(name) = items[0].as_string() {
+                if let Some(name) = items[0].as_string().cloned() {
                     if name.to_lowercase() == "ping" {
                         if items.len() != 1 {
                             return Err("ERR wrong number of arguments for 'ping' command".into());
@@ -19,21 +28,13 @@ impl CommandParser {
                     }
 
                     if name.to_lowercase() == "echo" {
-                        if items.len() != 2 {
-                            return Err("ERR wrong number of arguments for 'echo' command".into());
-                        }
-                        return Ok(Command::Echo(items[1].clone()));
+                        let mut str_items = Self::get_strings_exact(items, 2, "echo")?;
+                        return Ok(Command::Echo(str_items.remove(1)));
                     }
 
                     if name.to_lowercase() == "get" {
-                        if items.len() != 2 {
-                            return Err("ERR wrong number of arguments for 'get' command".into());
-                        }
-                        if let Some(key) = items[1].as_string() {
-                            return Ok(Command::Get(key.clone()));
-                        }
-
-                        return Err("ERR wrong key for 'get' command".into());
+                        let mut str_items = Self::get_strings_exact(items, 2, "get")?;
+                        return Ok(Command::Get(str_items.remove(1)));
                     }
 
                     if name.to_lowercase() == "set" {
@@ -108,26 +109,16 @@ impl CommandParser {
                     }
 
                     if name.to_lowercase() == "lrange" {
-                        if items.len() != 4 {
-                            return Err("ERR wrong number of arguments for 'lrange' command".into());
-                        }
-                        let Some(key) = items[1].as_string() else {
-                            return Err("ERR wrong key for 'lrange' command".into());
-                        };
-                        let Some(start_raw) = items[2].as_string() else {
-                            return Err("ERR wrong left range for 'lrange' command".into());
-                        };
-                        let Some(end_raw) = items[3].as_string() else {
-                            return Err("ERR wrong right range for 'lrange' command".into());
-                        };
-                        let Ok(start) = i64::from_str_radix(&start_raw, 10) else {
-                            return Err("ERR wrong left range value for 'lrange' command".into());
-                        };
-                        let Ok(end) = i64::from_str_radix(&end_raw, 10) else {
-                            return Err("ERR wrong right range value for 'lrange' command".into());
-                        };
+                        let mut str_items = Self::get_strings_exact(items, 4, "lrange")?;
+                        let start = to_number!(i64, &str_items[2], "lrange");
+                        let end = to_number!(i64, &str_items[3], "lrange");
 
-                        return Ok(Command::LRange(key.clone(), start, end));
+                        return Ok(Command::Lrange(str_items.remove(1), start, end));
+                    }
+
+                    if name.to_lowercase() == "llen" {
+                        let mut str_items = Self::get_strings_exact(items, 2, "llen")?;
+                        return Ok(Command::Llen(str_items.remove(1)));
                     }
 
                     return Err(format!("ERR unknown command '{}'", name.to_lowercase()));
@@ -139,5 +130,31 @@ impl CommandParser {
         }
 
         Err("ERR unknown command 'asdf'".into())
+    }
+
+    fn get_strings_exact(
+        values: Vec<RespValue>,
+        n: usize,
+        command_name: &str,
+    ) -> Result<Vec<String>, String> {
+        if values.len() != n {
+            return Err(format!(
+                "ERR wrong number of arguments for '{}' command",
+                command_name
+            ));
+        }
+
+        let mut out = vec![];
+        for value in values {
+            let Some(s) = value.as_string_owned() else {
+                return Err(format!(
+                    "ERR wrong value type for '{}' command",
+                    command_name
+                ));
+            };
+            out.push(s);
+        }
+
+        Ok(out)
     }
 }
