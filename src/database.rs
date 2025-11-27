@@ -185,6 +185,102 @@ impl Database {
         Ok(array.len())
     }
 
+    pub(crate) fn list_pop_one_front(&mut self, key: &str) -> Result<Option<String>, String> {
+        self.assert_array(key)?;
+
+        if !self.dict.contains_key(key) {
+            return Ok(None);
+        }
+
+        let Entry::Array(array) = self.dict.get_mut(key).unwrap() else {
+            unreachable!();
+        };
+
+        match array.pop_front() {
+            Some(elem) => Ok(Some(elem)),
+            _ => Ok(None),
+        }
+    }
+
+    pub(crate) fn list_pop_one_back(&mut self, key: &str) -> Result<Option<String>, String> {
+        self.assert_array(key)?;
+
+        if !self.dict.contains_key(key) {
+            return Ok(None);
+        }
+
+        let Entry::Array(array) = self.dict.get_mut(key).unwrap() else {
+            unreachable!();
+        };
+
+        match array.pop_back() {
+            Some(elem) => Ok(Some(elem)),
+            _ => Ok(None),
+        }
+    }
+
+    pub(crate) fn list_pop_multi_front(
+        &mut self,
+        key: &str,
+        n: usize,
+    ) -> Result<Option<Vec<String>>, String> {
+        self.assert_array(key)?;
+
+        if !self.dict.contains_key(key) {
+            return Ok(None);
+        }
+
+        let Entry::Array(array) = self.dict.get_mut(key).unwrap() else {
+            unreachable!();
+        };
+
+        if array.is_empty() {
+            return Ok(None);
+        }
+
+        let mut out = vec![];
+        for _ in 0..n {
+            if array.is_empty() {
+                break;
+            }
+
+            out.push(array.pop_front().unwrap());
+        }
+
+        Ok(Some(out))
+    }
+
+    pub(crate) fn list_pop_multi_back(
+        &mut self,
+        key: &str,
+        n: usize,
+    ) -> Result<Option<Vec<String>>, String> {
+        self.assert_array(key)?;
+
+        if !self.dict.contains_key(key) {
+            return Ok(None);
+        }
+
+        let Entry::Array(array) = self.dict.get_mut(key).unwrap() else {
+            unreachable!();
+        };
+
+        if array.is_empty() {
+            return Ok(None);
+        }
+
+        let mut out = vec![];
+        for _ in 0..n {
+            if array.is_empty() {
+                break;
+            }
+
+            out.push(array.pop_back().unwrap());
+        }
+
+        Ok(Some(out))
+    }
+
     fn assert_array(&self, key: &str) -> Result<(), String> {
         if self.dict.contains_key(key) {
             if !self.dict.get(key).map(|v| v.is_array()).unwrap() {

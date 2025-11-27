@@ -8,4 +8,8 @@ pub(crate) enum Command {
     Lpush(String, Vec<String>),
     Lrange(String, i64, i64),
     Llen(String),
+    Lpop(String),
+    Rpop(String),
+    Lpopn(String, usize),
+    Rpopn(String, usize),
 }

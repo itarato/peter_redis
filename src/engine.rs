@@ -58,6 +58,40 @@ impl Engine {
                 Ok(n) => Ok(RespValue::Integer(n as i64)),
                 Err(err) => Ok(RespValue::SimpleError(err)),
             },
+
+            Command::Lpop(key) => match self.db.list_pop_one_front(key) {
+                Ok(Some(v)) => return Ok(RespValue::BulkString(v)),
+                Ok(None) => return Ok(RespValue::Null),
+                Err(err) => Ok(RespValue::SimpleError(err)),
+            },
+
+            Command::Rpop(key) => match self.db.list_pop_one_back(key) {
+                Ok(Some(v)) => return Ok(RespValue::BulkString(v)),
+                Ok(None) => return Ok(RespValue::Null),
+                Err(err) => Ok(RespValue::SimpleError(err)),
+            },
+
+            Command::Lpopn(key, n) => match self.db.list_pop_multi_front(key, *n) {
+                Ok(Some(elems)) => Ok(RespValue::Array(
+                    elems
+                        .into_iter()
+                        .map(|e| RespValue::BulkString(e))
+                        .collect(),
+                )),
+                Ok(None) => return Ok(RespValue::Null),
+                Err(err) => Ok(RespValue::SimpleError(err)),
+            },
+
+            Command::Rpopn(key, n) => match self.db.list_pop_multi_back(key, *n) {
+                Ok(Some(elems)) => Ok(RespValue::Array(
+                    elems
+                        .into_iter()
+                        .map(|e| RespValue::BulkString(e))
+                        .collect(),
+                )),
+                Ok(None) => return Ok(RespValue::Null),
+                Err(err) => Ok(RespValue::SimpleError(err)),
+            },
         }
     }
 }

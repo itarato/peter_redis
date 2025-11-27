@@ -121,6 +121,32 @@ impl CommandParser {
                         return Ok(Command::Llen(str_items.remove(1)));
                     }
 
+                    if name.to_lowercase() == "lpop" {
+                        if items.len() == 2 {
+                            let mut str_items = Self::get_strings_exact(items, 2, "lpop")?;
+                            return Ok(Command::Lpop(str_items.remove(1)));
+                        }
+                        if items.len() == 3 {
+                            let mut str_items = Self::get_strings_exact(items, 3, "lpop")?;
+                            let n = to_number!(usize, &str_items[2], "lpop");
+                            return Ok(Command::Lpopn(str_items.remove(1), n));
+                        }
+                        return Err("ERR wrong number of arguments for 'lpop' command".into());
+                    }
+
+                    if name.to_lowercase() == "rpop" {
+                        if items.len() == 2 {
+                            let mut str_items = Self::get_strings_exact(items, 2, "rpop")?;
+                            return Ok(Command::Rpop(str_items.remove(1)));
+                        }
+                        if items.len() == 3 {
+                            let mut str_items = Self::get_strings_exact(items, 3, "rpop")?;
+                            let n = to_number!(usize, &str_items[2], "rpop");
+                            return Ok(Command::Rpopn(str_items.remove(1), n));
+                        }
+                        return Err("ERR wrong number of arguments for 'rpop' command".into());
+                    }
+
                     return Err(format!("ERR unknown command '{}'", name.to_lowercase()));
                 } else {
                     return Err("ERR wrong command type".into());
