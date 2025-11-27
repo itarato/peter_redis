@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use crate::common::current_time_ms;
 
@@ -9,7 +9,7 @@ struct ValueEntry {
 
 enum Entry {
     Value(ValueEntry),
-    Array(Vec<String>),
+    Array(VecDeque<String>),
 }
 
 impl Entry {
@@ -90,16 +90,43 @@ impl Database {
     pub(crate) fn push_to_array(
         &mut self,
         key: String,
-        mut values: Vec<String>,
+        values: Vec<String>,
     ) -> Result<usize, String> {
         self.assert_array(&key)?;
 
-        let entry = self.dict.entry(key.clone()).or_insert(Entry::Array(vec![]));
+        let entry = self
+            .dict
+            .entry(key.clone())
+            .or_insert(Entry::Array(VecDeque::new()));
         let Entry::Array(array) = entry else {
             unreachable!();
         };
 
-        array.append(&mut values);
+        for value in values {
+            array.push_back(value);
+        }
+
+        Ok(array.len())
+    }
+
+    pub(crate) fn insert_to_array(
+        &mut self,
+        key: String,
+        values: Vec<String>,
+    ) -> Result<usize, String> {
+        self.assert_array(&key)?;
+
+        let entry = self
+            .dict
+            .entry(key.clone())
+            .or_insert(Entry::Array(VecDeque::new()));
+        let Entry::Array(array) = entry else {
+            unreachable!();
+        };
+
+        for value in values {
+            array.push_front(value);
+        }
 
         Ok(array.len())
     }

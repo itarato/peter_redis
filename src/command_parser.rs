@@ -89,6 +89,24 @@ impl CommandParser {
                         return Ok(Command::Rpush(key.clone(), values));
                     }
 
+                    if name.to_lowercase() == "lpush" {
+                        if items.len() <= 2 {
+                            return Err("ERR wrong number of arguments for 'lpush' command".into());
+                        }
+                        let Some(key) = items[1].as_string() else {
+                            return Err("ERR wrong key for 'lpush' command".into());
+                        };
+
+                        let mut values = vec![];
+                        for i in 2..items.len() {
+                            let Some(value) = items[i].as_string() else {
+                                return Err("ERR wrong value for 'lpush' command".into());
+                            };
+                            values.push(value.clone());
+                        }
+                        return Ok(Command::Lpush(key.clone(), values));
+                    }
+
                     if name.to_lowercase() == "lrange" {
                         if items.len() != 4 {
                             return Err("ERR wrong number of arguments for 'lrange' command".into());

@@ -37,6 +37,13 @@ impl Engine {
                 }
             }
 
+            Command::Lpush(key, values) => {
+                match self.db.insert_to_array(key.clone(), values.clone()) {
+                    Ok(count) => Ok(RespValue::Integer(count as i64)),
+                    Err(err) => Ok(RespValue::SimpleError(err)),
+                }
+            }
+
             Command::LRange(key, start, end) => match self.db.get_list_lrange(key, *start, *end) {
                 Ok(array) => Ok(RespValue::Array(
                     array
