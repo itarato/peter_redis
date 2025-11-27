@@ -92,6 +92,10 @@ impl Engine {
                 Ok(None) => return Ok(RespValue::Null),
                 Err(err) => Ok(RespValue::SimpleError(err)),
             },
+
+            Command::Blpop(keys, timeout_secs) => {
+                unimplemented!()
+            }
         }
     }
 }

@@ -12,4 +12,5 @@ pub(crate) enum Command {
     Rpop(String),
     Lpopn(String, usize),
     Rpopn(String, usize),
+    Blpop(Vec<String>, f64),
 }

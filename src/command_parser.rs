@@ -1,3 +1,4 @@
+use core::f64;
 use std::vec;
 
 use crate::{commands::Command, resp::RespValue};
@@ -145,6 +146,25 @@ impl CommandParser {
                             return Ok(Command::Rpopn(str_items.remove(1), n));
                         }
                         return Err("ERR wrong number of arguments for 'rpop' command".into());
+                    }
+
+                    if name.to_lowercase() == "blpop" {
+                        if items.len() < 3 {
+                            return Err("ERR wrong number of arguments for 'blpop' command".into());
+                        }
+                        let items_len = items.len();
+                        let mut str_items = Self::get_strings_exact(items, items_len, "blpop")?;
+                        let timeout_str = str_items.pop().unwrap();
+                        let mut timeout_secs: f64 = timeout_str
+                            .parse()
+                            .map_err(|_| format!("ERR wrong expiry value for 'blpop' command"))?;
+
+                        if timeout_secs == 0.0 {
+                            timeout_secs = 60.0 * 60.0 * 24.0; // 1 day.
+                        }
+
+                        let keys = str_items.into_iter().skip(1).collect::<Vec<String>>();
+                        return Ok(Command::Blpop(keys, timeout_secs));
                     }
 
                     return Err(format!("ERR unknown command '{}'", name.to_lowercase()));
