@@ -9,6 +9,11 @@ use crate::{
     resp::RespValue,
 };
 
+enum ArrayDirection {
+    Front,
+    Back,
+}
+
 pub(crate) struct Engine {
     db: RwLock<Database>,
     list_notification: Arc<Notify>,
@@ -46,36 +51,6 @@ impl Engine {
                 Err(err) => Ok(RespValue::SimpleError(err)),
             },
 
-            Command::Rpush(key, values) => {
-                match self
-                    .db
-                    .write()
-                    .await
-                    .push_to_array(key.clone(), values.clone())
-                {
-                    Ok(count) => {
-                        self.list_notification.notify_one();
-                        Ok(RespValue::Integer(count as i64))
-                    }
-                    Err(err) => Ok(RespValue::SimpleError(err)),
-                }
-            }
-
-            Command::Lpush(key, values) => {
-                match self
-                    .db
-                    .write()
-                    .await
-                    .insert_to_array(key.clone(), values.clone())
-                {
-                    Ok(count) => {
-                        self.list_notification.notify_one();
-                        Ok(RespValue::Integer(count as i64))
-                    }
-                    Err(err) => Ok(RespValue::SimpleError(err)),
-                }
-            }
-
             Command::Lrange(key, start, end) => {
                 match self.db.read().await.get_list_lrange(key, *start, *end) {
                     Ok(array) => Ok(RespValue::Array(
@@ -93,103 +68,129 @@ impl Engine {
                 Err(err) => Ok(RespValue::SimpleError(err)),
             },
 
-            Command::Lpop(key) => match self.db.write().await.list_pop_one_front(key) {
-                Ok(Some(v)) => return Ok(RespValue::BulkString(v)),
-                Ok(None) => return Ok(RespValue::NullBulkString),
-                Err(err) => Ok(RespValue::SimpleError(err)),
-            },
+            Command::Rpush(key, values) => self.push(key, values, ArrayDirection::Back).await,
 
-            Command::Rpop(key) => match self.db.write().await.list_pop_one_back(key) {
-                Ok(Some(v)) => return Ok(RespValue::BulkString(v)),
-                Ok(None) => return Ok(RespValue::NullBulkString),
-                Err(err) => Ok(RespValue::SimpleError(err)),
-            },
+            Command::Lpush(key, values) => self.push(key, values, ArrayDirection::Front).await,
 
-            Command::Lpopn(key, n) => match self.db.write().await.list_pop_multi_front(key, *n) {
-                Ok(Some(elems)) => Ok(RespValue::Array(
-                    elems
-                        .into_iter()
-                        .map(|e| RespValue::BulkString(e))
-                        .collect(),
-                )),
-                Ok(None) => return Ok(RespValue::NullBulkString),
-                Err(err) => Ok(RespValue::SimpleError(err)),
-            },
+            Command::Lpop(key) => self.pop(key, ArrayDirection::Front).await,
 
-            Command::Rpopn(key, n) => match self.db.write().await.list_pop_multi_back(key, *n) {
-                Ok(Some(elems)) => Ok(RespValue::Array(
-                    elems
-                        .into_iter()
-                        .map(|e| RespValue::BulkString(e))
-                        .collect(),
-                )),
-                Ok(None) => return Ok(RespValue::NullBulkString),
-                Err(err) => Ok(RespValue::SimpleError(err)),
-            },
+            Command::Rpop(key) => self.pop(key, ArrayDirection::Back).await,
+
+            Command::Lpopn(key, n) => self.pop_multi(key, n, ArrayDirection::Front).await,
+
+            Command::Rpopn(key, n) => self.pop_multi(key, n, ArrayDirection::Back).await,
 
             Command::Blpop(keys, timeout_secs) => {
-                let now_secs = current_time_secs_f64();
-                let end_secs = now_secs + timeout_secs;
-
-                loop {
-                    for key in keys {
-                        if let Some(v) = self.db.write().await.list_pop_one_front(key)? {
-                            return Ok(RespValue::Array(vec![
-                                RespValue::BulkString(key.clone()),
-                                RespValue::BulkString(v),
-                            ]));
-                        }
-                    }
-
-                    let ttl = end_secs - current_time_secs_f64();
-                    if ttl <= 0.0 {
-                        return Ok(RespValue::NullArray);
-                    }
-
-                    tokio::spawn({
-                        let notification = self.list_notification.clone();
-
-                        async move {
-                            tokio::time::sleep(Duration::from_secs_f64(ttl)).await;
-                            notification.notify_waiters();
-                        }
-                    });
-
-                    self.list_notification.notified().await;
-                }
+                self.blocking_pop(keys, timeout_secs, ArrayDirection::Front)
+                    .await
             }
 
             Command::Brpop(keys, timeout_secs) => {
-                let now_secs = current_time_secs_f64();
-                let end_secs = now_secs + timeout_secs;
+                self.blocking_pop(keys, timeout_secs, ArrayDirection::Back)
+                    .await
+            }
+        }
+    }
 
-                loop {
-                    for key in keys {
-                        if let Some(v) = self.db.write().await.list_pop_one_back(key)? {
-                            return Ok(RespValue::Array(vec![
-                                RespValue::BulkString(key.clone()),
-                                RespValue::BulkString(v),
-                            ]));
-                        }
-                    }
+    async fn push(
+        &self,
+        key: &String,
+        values: &Vec<String>,
+        dir: ArrayDirection,
+    ) -> Result<RespValue, Error> {
+        let result = match dir {
+            ArrayDirection::Back => self
+                .db
+                .write()
+                .await
+                .push_to_array(key.clone(), values.clone()),
+            ArrayDirection::Front => self
+                .db
+                .write()
+                .await
+                .insert_to_array(key.clone(), values.clone()),
+        };
+        match result {
+            Ok(count) => {
+                self.list_notification.notify_one();
+                Ok(RespValue::Integer(count as i64))
+            }
+            Err(err) => Ok(RespValue::SimpleError(err)),
+        }
+    }
 
-                    let ttl = end_secs - current_time_secs_f64();
-                    if ttl <= 0.0 {
-                        return Ok(RespValue::NullArray);
-                    }
+    async fn pop(&self, key: &String, dir: ArrayDirection) -> Result<RespValue, Error> {
+        let result = match dir {
+            ArrayDirection::Back => self.db.write().await.list_pop_one_back(key),
+            ArrayDirection::Front => self.db.write().await.list_pop_one_front(key),
+        };
+        match result {
+            Ok(Some(v)) => return Ok(RespValue::BulkString(v)),
+            Ok(None) => return Ok(RespValue::NullBulkString),
+            Err(err) => Ok(RespValue::SimpleError(err)),
+        }
+    }
 
-                    tokio::spawn({
-                        let notification = self.list_notification.clone();
+    async fn pop_multi(
+        &self,
+        key: &String,
+        n: &usize,
+        dir: ArrayDirection,
+    ) -> Result<RespValue, Error> {
+        let result = match dir {
+            ArrayDirection::Back => self.db.write().await.list_pop_multi_back(key, *n),
+            ArrayDirection::Front => self.db.write().await.list_pop_multi_front(key, *n),
+        };
+        match result {
+            Ok(Some(elems)) => Ok(RespValue::Array(
+                elems
+                    .into_iter()
+                    .map(|e| RespValue::BulkString(e))
+                    .collect(),
+            )),
+            Ok(None) => return Ok(RespValue::NullBulkString),
+            Err(err) => Ok(RespValue::SimpleError(err)),
+        }
+    }
 
-                        async move {
-                            tokio::time::sleep(Duration::from_secs_f64(ttl)).await;
-                            notification.notify_waiters();
-                        }
-                    });
+    async fn blocking_pop(
+        &self,
+        keys: &Vec<String>,
+        timeout_secs: &f64,
+        dir: ArrayDirection,
+    ) -> Result<RespValue, Error> {
+        let now_secs = current_time_secs_f64();
+        let end_secs = now_secs + timeout_secs;
 
-                    self.list_notification.notified().await;
+        loop {
+            for key in keys {
+                let result = match dir {
+                    ArrayDirection::Back => self.db.write().await.list_pop_one_back(key)?,
+                    ArrayDirection::Front => self.db.write().await.list_pop_one_front(key)?,
+                };
+                if let Some(v) = result {
+                    return Ok(RespValue::Array(vec![
+                        RespValue::BulkString(key.clone()),
+                        RespValue::BulkString(v),
+                    ]));
                 }
             }
+
+            let ttl = end_secs - current_time_secs_f64();
+            if ttl <= 0.0 {
+                return Ok(RespValue::NullArray);
+            }
+
+            tokio::spawn({
+                let notification = self.list_notification.clone();
+
+                async move {
+                    tokio::time::sleep(Duration::from_secs_f64(ttl)).await;
+                    notification.notify_waiters();
+                }
+            });
+
+            self.list_notification.notified().await;
         }
     }
 }
