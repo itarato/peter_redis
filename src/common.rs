@@ -14,6 +14,13 @@ pub(crate) fn current_time_ms() -> u128 {
         .as_millis()
 }
 
+pub(crate) fn current_time_secs_f64() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time before UNIX EPOCH")
+        .as_secs_f64()
+}
+
 pub(crate) async fn read_from_tcp_stream(
     stream: &mut TcpStream,
 ) -> Result<Option<RespValue>, Error> {

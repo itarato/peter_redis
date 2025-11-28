@@ -4,7 +4,6 @@ use anyhow::Context;
 use tokio::{
     io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
-    sync::Mutex,
 };
 
 use crate::{
@@ -15,13 +14,13 @@ use crate::{
 };
 
 pub(crate) struct Server {
-    engine: Arc<Mutex<Engine>>,
+    engine: Arc<Engine>,
 }
 
 impl Server {
     pub(crate) fn new() -> Self {
         Self {
-            engine: Arc::new(Mutex::new(Engine::new())),
+            engine: Arc::new(Engine::new()),
         }
     }
 
@@ -45,15 +44,12 @@ impl Server {
         }
     }
 
-    async fn handle_request(
-        mut stream: TcpStream,
-        engine: Arc<Mutex<Engine>>,
-    ) -> Result<(), Error> {
+    async fn handle_request(mut stream: TcpStream, engine: Arc<Engine>) -> Result<(), Error> {
         loop {
             match read_from_tcp_stream(&mut stream).await? {
                 Some(input) => match CommandParser::parse(input) {
                     Ok(command) => {
-                        let result = engine.lock().await.execute(&command)?;
+                        let result = engine.execute(&command).await?;
                         stream
                             .write_all(result.serialize().as_bytes())
                             .await

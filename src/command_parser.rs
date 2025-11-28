@@ -167,6 +167,25 @@ impl CommandParser {
                         return Ok(Command::Blpop(keys, timeout_secs));
                     }
 
+                    if name.to_lowercase() == "brpop" {
+                        if items.len() < 3 {
+                            return Err("ERR wrong number of arguments for 'brpop' command".into());
+                        }
+                        let items_len = items.len();
+                        let mut str_items = Self::get_strings_exact(items, items_len, "brpop")?;
+                        let timeout_str = str_items.pop().unwrap();
+                        let mut timeout_secs: f64 = timeout_str
+                            .parse()
+                            .map_err(|_| format!("ERR wrong expiry value for 'brpop' command"))?;
+
+                        if timeout_secs == 0.0 {
+                            timeout_secs = 60.0 * 60.0 * 24.0; // 1 day.
+                        }
+
+                        let keys = str_items.into_iter().skip(1).collect::<Vec<String>>();
+                        return Ok(Command::Brpop(keys, timeout_secs));
+                    }
+
                     return Err(format!("ERR unknown command '{}'", name.to_lowercase()));
                 } else {
                     return Err("ERR wrong command type".into());
