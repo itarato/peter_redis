@@ -7,6 +7,17 @@ use crate::resp::RespValue;
 
 pub(crate) type Error = Box<dyn std::error::Error + Send + Sync>;
 
+pub(crate) type KeyValuePair = (String, String);
+
+pub(crate) type CompleteStreamEntryID = (u64, usize);
+
+#[derive(Debug)]
+pub(crate) enum StreamEntryID {
+    Wildcard,
+    MsOnly(u64),
+    Full(CompleteStreamEntryID),
+}
+
 pub(crate) fn current_time_ms() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

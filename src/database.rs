@@ -1,15 +1,31 @@
 use std::collections::{HashMap, VecDeque};
 
-use crate::common::current_time_ms;
+use tokio::stream;
+
+use crate::common::{current_time_ms, CompleteStreamEntryID, KeyValuePair, StreamEntryID};
 
 struct ValueEntry {
     value: String,
     expiry_timestamp_ms: Option<u128>,
 }
 
+struct StreamValue {
+    id: CompleteStreamEntryID,
+    kvpairs: Vec<KeyValuePair>,
+}
+
+impl StreamValue {
+    fn new(id: CompleteStreamEntryID, kvpairs: Vec<KeyValuePair>) -> Self {
+        Self { id, kvpairs }
+    }
+}
+
+type StreamEntry = VecDeque<StreamValue>;
+
 enum Entry {
     Value(ValueEntry),
     Array(VecDeque<String>),
+    Stream(StreamEntry),
 }
 
 impl Entry {
@@ -27,10 +43,18 @@ impl Entry {
         }
     }
 
+    fn is_stream(&self) -> bool {
+        match self {
+            Entry::Stream(_) => true,
+            _ => false,
+        }
+    }
+
     fn type_name(&self) -> &str {
         match self {
             Entry::Array(_) => "list",
             Entry::Value(_) => "string",
+            Entry::Stream(_) => "stream",
         }
     }
 }
@@ -295,6 +319,45 @@ impl Database {
             .unwrap_or("none")
     }
 
+    pub(crate) fn stream_push(
+        &mut self,
+        key: String,
+        id: StreamEntryID,
+        kvpairs: Vec<KeyValuePair>,
+    ) -> Result<CompleteStreamEntryID, String> {
+        self.assert_stream(&key)?;
+
+        let stream = self
+            .dict
+            .entry(key)
+            .or_insert(Entry::Stream(VecDeque::new()));
+        let Entry::Stream(stream) = stream else {
+            unreachable!()
+        };
+
+        let id = Self::resolve_stream_entry_id(id, stream);
+
+        stream.push_back(StreamValue::new(id, kvpairs));
+
+        Ok(id)
+    }
+
+    fn resolve_stream_entry_id(id: StreamEntryID, stream: &StreamEntry) -> CompleteStreamEntryID {
+        match id {
+            StreamEntryID::Full(id) => id,
+            StreamEntryID::MsOnly(ms) => {
+                let mut max_available_idx = 0usize;
+                for entry in stream {
+                    if entry.id.0 == ms && entry.id.1 >= max_available_idx {
+                        max_available_idx = entry.id.1 + 1;
+                    }
+                }
+                (ms, max_available_idx)
+            }
+            StreamEntryID::Wildcard => unimplemented!(),
+        }
+    }
+
     fn assert_array(&self, key: &str) -> Result<(), String> {
         if self.dict.contains_key(key) {
             if !self.dict.get(key).map(|v| v.is_array()).unwrap() {
@@ -310,6 +373,18 @@ impl Database {
     fn assert_single_value(&self, key: &String) -> Result<(), String> {
         if self.dict.contains_key(key) {
             if !self.dict.get(key).map(|v| v.is_value()).unwrap() {
+                return Err(
+                    "WRONGTYPE Operation against a key holding the wrong kind of value".into(),
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    fn assert_stream(&self, key: &String) -> Result<(), String> {
+        if self.dict.contains_key(key) {
+            if !self.dict.get(key).map(|v| v.is_stream()).unwrap() {
                 return Err(
                     "WRONGTYPE Operation against a key holding the wrong kind of value".into(),
                 );

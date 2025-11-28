@@ -1,3 +1,5 @@
+use crate::common::{KeyValuePair, StreamEntryID};
+
 #[derive(Debug)]
 pub(crate) enum Command {
     Ping,
@@ -15,4 +17,5 @@ pub(crate) enum Command {
     Blpop(Vec<String>, f64),
     Brpop(Vec<String>, f64),
     Type(String),
+    Xadd(String, StreamEntryID, Vec<KeyValuePair>),
 }
