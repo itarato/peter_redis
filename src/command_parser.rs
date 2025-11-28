@@ -186,6 +186,11 @@ impl CommandParser {
                         return Ok(Command::Brpop(keys, timeout_secs));
                     }
 
+                    if name.to_lowercase() == "type" {
+                        let mut str_items = Self::get_strings_exact(items, 2, "type")?;
+                        return Ok(Command::Type(str_items.remove(1)));
+                    }
+
                     return Err(format!("ERR unknown command '{}'", name.to_lowercase()));
                 } else {
                     return Err("ERR wrong command type".into());

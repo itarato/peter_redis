@@ -89,6 +89,10 @@ impl Engine {
                 self.blocking_pop(keys, timeout_secs, ArrayDirection::Back)
                     .await
             }
+
+            Command::Type(key) => Ok(RespValue::SimpleString(
+                self.db.read().await.get_key_type_name(key).to_string(),
+            )),
         }
     }
 

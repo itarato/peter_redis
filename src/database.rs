@@ -26,6 +26,13 @@ impl Entry {
             _ => false,
         }
     }
+
+    fn type_name(&self) -> &str {
+        match self {
+            Entry::Array(_) => "list",
+            Entry::Value(_) => "string",
+        }
+    }
 }
 
 pub(crate) struct Database {
@@ -279,6 +286,13 @@ impl Database {
         }
 
         Ok(Some(out))
+    }
+
+    pub(crate) fn get_key_type_name(&self, key: &str) -> &str {
+        self.dict
+            .get(key)
+            .map(|elem| elem.type_name())
+            .unwrap_or("none")
     }
 
     fn assert_array(&self, key: &str) -> Result<(), String> {
