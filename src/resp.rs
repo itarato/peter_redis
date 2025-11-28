@@ -2,9 +2,10 @@
 pub(crate) enum RespValue {
     SimpleString(String),
     BulkString(String),
+    NullBulkString,
     Array(Vec<RespValue>),
+    NullArray,
     Integer(i64),
-    Null,
     SimpleError(String),
 }
 
@@ -21,9 +22,10 @@ impl RespValue {
                     .collect::<Vec<_>>()
                     .join("")
             ),
-            Self::Null => "$-1\r\n".into(),
+            Self::NullBulkString => "$-1\r\n".into(),
             Self::Integer(n) => format!(":{}\r\n", n),
             Self::SimpleError(s) => format!("-{}\r\n", s),
+            Self::NullArray => "*-1\r\n".into(),
         }
     }
 
@@ -64,7 +66,7 @@ mod test {
 
     #[test]
     fn test_null_bulk_string() {
-        assert_eq!("$-1\r\n".to_string(), RespValue::Null.serialize());
+        assert_eq!("$-1\r\n".to_string(), RespValue::NullBulkString.serialize());
     }
 
     #[test]
@@ -77,6 +79,11 @@ mod test {
             ])
             .serialize()
         );
+    }
+
+    #[test]
+    fn test_null_bulk_array() {
+        assert_eq!("*-1\r\n".to_string(), RespValue::NullArray.serialize());
     }
 
     #[test]

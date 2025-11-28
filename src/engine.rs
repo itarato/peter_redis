@@ -42,7 +42,7 @@ impl Engine {
 
             Command::Get(key) => match self.db.read().await.get(key) {
                 Ok(Some(v)) => Ok(RespValue::BulkString(v.clone())),
-                Ok(None) => Ok(RespValue::Null),
+                Ok(None) => Ok(RespValue::NullBulkString),
                 Err(err) => Ok(RespValue::SimpleError(err)),
             },
 
@@ -95,13 +95,13 @@ impl Engine {
 
             Command::Lpop(key) => match self.db.write().await.list_pop_one_front(key) {
                 Ok(Some(v)) => return Ok(RespValue::BulkString(v)),
-                Ok(None) => return Ok(RespValue::Null),
+                Ok(None) => return Ok(RespValue::NullBulkString),
                 Err(err) => Ok(RespValue::SimpleError(err)),
             },
 
             Command::Rpop(key) => match self.db.write().await.list_pop_one_back(key) {
                 Ok(Some(v)) => return Ok(RespValue::BulkString(v)),
-                Ok(None) => return Ok(RespValue::Null),
+                Ok(None) => return Ok(RespValue::NullBulkString),
                 Err(err) => Ok(RespValue::SimpleError(err)),
             },
 
@@ -112,7 +112,7 @@ impl Engine {
                         .map(|e| RespValue::BulkString(e))
                         .collect(),
                 )),
-                Ok(None) => return Ok(RespValue::Null),
+                Ok(None) => return Ok(RespValue::NullBulkString),
                 Err(err) => Ok(RespValue::SimpleError(err)),
             },
 
@@ -123,7 +123,7 @@ impl Engine {
                         .map(|e| RespValue::BulkString(e))
                         .collect(),
                 )),
-                Ok(None) => return Ok(RespValue::Null),
+                Ok(None) => return Ok(RespValue::NullBulkString),
                 Err(err) => Ok(RespValue::SimpleError(err)),
             },
 
@@ -143,7 +143,7 @@ impl Engine {
 
                     let ttl = end_secs - current_time_secs_f64();
                     if ttl <= 0.0 {
-                        return Ok(RespValue::Null);
+                        return Ok(RespValue::NullArray);
                     }
 
                     tokio::spawn({
@@ -175,7 +175,7 @@ impl Engine {
 
                     let ttl = end_secs - current_time_secs_f64();
                     if ttl <= 0.0 {
-                        return Ok(RespValue::Null);
+                        return Ok(RespValue::NullArray);
                     }
 
                     tokio::spawn({
