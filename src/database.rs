@@ -353,7 +353,7 @@ impl Database {
         let seq = match id {
             StreamEntryID::Full(id) => id.1,
             StreamEntryID::MsOnly(_) | StreamEntryID::Wildcard => {
-                let mut max_available_idx = 0usize;
+                let mut max_available_idx = if ms == 0 { 1 } else { 0 };
                 for entry in stream {
                     if entry.id.0 == ms && entry.id.1 >= max_available_idx {
                         max_available_idx = entry.id.1 + 1;
