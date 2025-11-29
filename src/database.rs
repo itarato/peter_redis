@@ -7,13 +7,16 @@ struct ValueEntry {
     expiry_timestamp_ms: Option<u128>,
 }
 
-struct StreamValue {
-    id: CompleteStreamEntryID,
-    kvpairs: Vec<KeyValuePair>,
+pub(crate) type KeyValuePairList = Vec<KeyValuePair>;
+
+#[derive(Clone)]
+pub(crate) struct StreamValue {
+    pub(crate) id: CompleteStreamEntryID,
+    pub(crate) kvpairs: KeyValuePairList,
 }
 
 impl StreamValue {
-    fn new(id: CompleteStreamEntryID, kvpairs: Vec<KeyValuePair>) -> Self {
+    fn new(id: CompleteStreamEntryID, kvpairs: KeyValuePairList) -> Self {
         Self { id, kvpairs }
     }
 }
@@ -340,6 +343,37 @@ impl Database {
         Ok(id)
     }
 
+    pub(crate) fn stream_get_range(
+        &self,
+        key: &str,
+        start: CompleteStreamEntryID,
+        end: CompleteStreamEntryID,
+        count: usize,
+    ) -> Result<Vec<StreamValue>, String> {
+        self.assert_stream(key)?;
+
+        if !self.dict.contains_key(key) {
+            return Ok(vec![]);
+        }
+
+        let Entry::Stream(stream) = self.dict.get(key).unwrap() else {
+            unreachable!()
+        };
+        let mut out = vec![];
+
+        for elem in stream {
+            if out.len() >= count {
+                break;
+            }
+
+            if elem.id >= start && elem.id <= end {
+                out.push(elem.clone());
+            }
+        }
+
+        Ok(out)
+    }
+
     fn resolve_stream_entry_id(
         id: StreamEntryID,
         stream: &StreamEntry,
@@ -376,10 +410,7 @@ impl Database {
             }
             if entry.id.0 == ms {
                 if seq <= entry.id.1 {
-                    return Err(
-                    "ERR The ID specified in XADD is equal or smaller than the target stream top item"
-                        .into(),
-                );
+                    return Err("ERR The ID specified in XADD is equal or smaller than the target stream top item".into());
                 }
             }
         }
@@ -411,7 +442,7 @@ impl Database {
         Ok(())
     }
 
-    fn assert_stream(&self, key: &String) -> Result<(), String> {
+    fn assert_stream(&self, key: &str) -> Result<(), String> {
         if self.dict.contains_key(key) {
             if !self.dict.get(key).map(|v| v.is_stream()).unwrap() {
                 return Err(

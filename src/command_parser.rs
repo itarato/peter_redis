@@ -1,5 +1,5 @@
 use core::f64;
-use std::vec;
+use std::{u128, usize, vec};
 
 use crate::{
     commands::Command,
@@ -224,6 +224,35 @@ impl CommandParser {
                         return Ok(Command::Xadd(key, id, kvpairs));
                     }
 
+                    if name.to_lowercase() == "xrange" {
+                        let read_len = match items.len() {
+                            4 | 6 => items.len(),
+                            _ => {
+                                return Err(
+                                    "ERR wrong number of arguments for 'xrange' command".into()
+                                )
+                            }
+                        };
+
+                        let mut str_items = Self::get_strings_exact(items, read_len, "xrange")?;
+                        str_items.remove(0);
+                        let key = str_items.remove(0);
+                        let start = Self::stream_range_id_from_raw(&str_items[0], 0)?;
+                        let end = Self::stream_range_id_from_raw(&str_items[1], usize::MAX)?;
+
+                        let count = if read_len == 6 {
+                            if str_items[2] == "COUNT" {
+                                to_number!(usize, &str_items[3], "xrange")
+                            } else {
+                                return Err("ERR wrong arguments for 'xrange' command".into());
+                            }
+                        } else {
+                            usize::MAX
+                        };
+
+                        return Ok(Command::Xrange(key, start, end, count));
+                    }
+
                     return Err(format!("ERR unknown command '{}'", name.to_lowercase()));
                 } else {
                     return Err("ERR wrong command type".into());
@@ -282,5 +311,34 @@ impl CommandParser {
             .map_err(|_| "ERR invalid seq in stream entry id".to_string())?;
 
         Ok(StreamEntryID::Full(CompleteStreamEntryID(ms, seq)))
+    }
+
+    fn stream_range_id_from_raw(
+        raw: &str,
+        default_seq: usize,
+    ) -> Result<CompleteStreamEntryID, String> {
+        if raw == "-" {
+            return Ok(CompleteStreamEntryID(0, 1));
+        }
+        if raw == "+" {
+            return Ok(CompleteStreamEntryID(u128::MAX, usize::MAX));
+        }
+
+        let parts = raw.split('-').collect::<Vec<_>>();
+        if parts.len() == 1 {
+            return Ok(CompleteStreamEntryID(
+                to_number!(u128, parts[0], "xrange"),
+                default_seq,
+            ));
+        }
+
+        if parts.len() == 2 {
+            return Ok(CompleteStreamEntryID(
+                to_number!(u128, parts[0], "xrange"),
+                to_number!(usize, parts[1], "xrange"),
+            ));
+        }
+
+        Err("ERR invalid ms in stream entry id".to_string())
     }
 }

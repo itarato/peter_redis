@@ -9,12 +9,21 @@ pub(crate) type Error = Box<dyn std::error::Error + Send + Sync>;
 
 pub(crate) type KeyValuePair = (String, String);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Ord)]
 pub(crate) struct CompleteStreamEntryID(pub(crate) u128, pub(crate) usize);
 
 impl CompleteStreamEntryID {
     pub(crate) fn to_string(&self) -> String {
         format!("{}-{}", self.0, self.1)
+    }
+}
+
+impl PartialOrd for CompleteStreamEntryID {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match self.0.cmp(&other.0) {
+            std::cmp::Ordering::Greater | std::cmp::Ordering::Less => self.0.partial_cmp(&other.0),
+            std::cmp::Ordering::Equal => self.1.partial_cmp(&other.1),
+        }
     }
 }
 

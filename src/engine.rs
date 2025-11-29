@@ -105,6 +105,42 @@ impl Engine {
                     Err(err) => Ok(RespValue::SimpleError(err)),
                 }
             }
+
+            Command::Xrange(key, start, end, count) => {
+                if *count == 0 {
+                    return Ok(RespValue::NullBulkString);
+                }
+
+                match self
+                    .db
+                    .read()
+                    .await
+                    .stream_get_range(key, start.clone(), end.clone(), *count)
+                {
+                    Ok(list) => Ok(RespValue::Array(
+                        list.into_iter()
+                            .map(|value| {
+                                RespValue::Array(vec![
+                                    RespValue::BulkString(value.id.to_string()),
+                                    RespValue::Array(
+                                        value
+                                            .kvpairs
+                                            .into_iter()
+                                            .flat_map(|kvpair| {
+                                                vec![
+                                                    RespValue::BulkString(kvpair.0),
+                                                    RespValue::BulkString(kvpair.1),
+                                                ]
+                                            })
+                                            .collect::<Vec<_>>(),
+                                    ),
+                                ])
+                            })
+                            .collect::<Vec<_>>(),
+                    )),
+                    Err(err) => Ok(RespValue::SimpleError(err)),
+                }
+            }
         }
     }
 
