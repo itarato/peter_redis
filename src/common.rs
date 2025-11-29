@@ -1,3 +1,5 @@
+use std::u128;
+
 use anyhow::Context;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::BufReader;
@@ -15,6 +17,10 @@ pub(crate) struct CompleteStreamEntryID(pub(crate) u128, pub(crate) usize);
 impl CompleteStreamEntryID {
     pub(crate) fn to_string(&self) -> String {
         format!("{}-{}", self.0, self.1)
+    }
+
+    pub(crate) fn max() -> Self {
+        CompleteStreamEntryID(u128::MAX, usize::MAX)
     }
 }
 

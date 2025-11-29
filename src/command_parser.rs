@@ -241,7 +241,7 @@ impl CommandParser {
                         let end = Self::stream_range_id_from_raw(&str_items[1], usize::MAX)?;
 
                         let count = if read_len == 6 {
-                            if str_items[2] == "COUNT" {
+                            if str_items[2].to_lowercase() == "COUNT" {
                                 to_number!(usize, &str_items[3], "xrange")
                             } else {
                                 return Err("ERR wrong arguments for 'xrange' command".into());
@@ -251,6 +251,47 @@ impl CommandParser {
                         };
 
                         return Ok(Command::Xrange(key, start, end, count));
+                    }
+
+                    if name.to_lowercase() == "xread" {
+                        if items.len() < 4 {
+                            return Err("ERR wrong number of arguments for 'xread' command".into());
+                        }
+
+                        let items_len = items.len();
+                        let mut str_items = Self::get_strings_exact(items, items_len, "xread")?;
+                        str_items.remove(0); // Name.
+
+                        let count = if str_items[0].to_lowercase() == "count" {
+                            str_items.remove(0); // Word "count".
+                            let count_raw = str_items.remove(0);
+                            to_number!(usize, &count_raw, "xread")
+                        } else {
+                            usize::MAX
+                        };
+
+                        if str_items.is_empty() || str_items[0].to_lowercase() != "streams" {
+                            return Err("ERR missing 'STREAMS' from 'xread' command".into());
+                        }
+                        str_items.remove(0); // Word "streams".
+
+                        if str_items.len() % 2 != 0 {
+                            return Err("ERR wrong number of arguments for 'xread' command".into());
+                        }
+
+                        let key_id_len = str_items.len() / 2;
+                        let mut keys = vec![];
+                        for _ in 0..key_id_len {
+                            keys.push(str_items.remove(0));
+                        }
+                        let mut ids = vec![];
+                        for i in 0..key_id_len {
+                            ids.push(Self::stream_range_id_from_raw(&str_items[i], 0)?);
+                        }
+
+                        let key_and_ids = keys.into_iter().zip(ids).collect::<Vec<_>>();
+
+                        return Ok(Command::Xread(key_and_ids, count));
                     }
 
                     return Err(format!("ERR unknown command '{}'", name.to_lowercase()));

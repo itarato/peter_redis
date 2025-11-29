@@ -350,6 +350,40 @@ impl Database {
         end: CompleteStreamEntryID,
         count: usize,
     ) -> Result<Vec<StreamValue>, String> {
+        self.stream_read_single_from_id_exclusive(key, start, true, end, true, count)
+    }
+
+    pub(crate) fn stream_read_multi_from_id_exclusive(
+        &self,
+        key_id_pairs: Vec<(String, CompleteStreamEntryID)>,
+        count: usize,
+    ) -> Result<Vec<(String, Vec<StreamValue>)>, String> {
+        let mut streams = vec![];
+
+        for (key, start) in key_id_pairs {
+            let stream = self.stream_read_single_from_id_exclusive(
+                &key,
+                start,
+                false,
+                CompleteStreamEntryID::max(),
+                true,
+                count,
+            )?;
+            streams.push((key, stream));
+        }
+
+        Ok(streams)
+    }
+
+    fn stream_read_single_from_id_exclusive(
+        &self,
+        key: &str,
+        start: CompleteStreamEntryID,
+        start_inclusive: bool,
+        end: CompleteStreamEntryID,
+        end_inclusive: bool,
+        count: usize,
+    ) -> Result<Vec<StreamValue>, String> {
         self.assert_stream(key)?;
 
         if !self.dict.contains_key(key) {
@@ -366,7 +400,9 @@ impl Database {
                 break;
             }
 
-            if elem.id >= start && elem.id <= end {
+            if ((start_inclusive && elem.id >= start) || (!start_inclusive && elem.id > start))
+                && ((end_inclusive && elem.id <= end) || (!end_inclusive && elem.id < end))
+            {
                 out.push(elem.clone());
             }
         }

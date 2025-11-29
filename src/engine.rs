@@ -141,6 +141,49 @@ impl Engine {
                     Err(err) => Ok(RespValue::SimpleError(err)),
                 }
             }
+
+            Command::Xread(key_id_pairs, count) => {
+                match self
+                    .db
+                    .read()
+                    .await
+                    .stream_read_multi_from_id_exclusive(key_id_pairs.clone(), *count)
+                {
+                    Ok(result) => Ok(RespValue::Array(
+                        result
+                            .into_iter()
+                            .map(|(key, stream)| {
+                                RespValue::Array(vec![
+                                    RespValue::BulkString(key),
+                                    RespValue::Array(
+                                        stream
+                                            .into_iter()
+                                            .map(|value| {
+                                                RespValue::Array(vec![
+                                                    RespValue::BulkString(value.id.to_string()),
+                                                    RespValue::Array(
+                                                        value
+                                                            .kvpairs
+                                                            .into_iter()
+                                                            .flat_map(|kvpair| {
+                                                                vec![
+                                                                    RespValue::BulkString(kvpair.0),
+                                                                    RespValue::BulkString(kvpair.1),
+                                                                ]
+                                                            })
+                                                            .collect::<Vec<_>>(),
+                                                    ),
+                                                ])
+                                            })
+                                            .collect::<Vec<_>>(),
+                                    ),
+                                ])
+                            })
+                            .collect::<Vec<_>>(),
+                    )),
+                    Err(err) => Ok(RespValue::SimpleError(err)),
+                }
+            }
         }
     }
 

@@ -19,4 +19,5 @@ pub(crate) enum Command {
     Type(String),
     Xadd(String, StreamEntryID, Vec<KeyValuePair>),
     Xrange(String, CompleteStreamEntryID, CompleteStreamEntryID, usize),
+    Xread(Vec<(String, CompleteStreamEntryID)>, usize),
 }
