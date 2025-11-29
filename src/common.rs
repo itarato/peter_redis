@@ -9,12 +9,19 @@ pub(crate) type Error = Box<dyn std::error::Error + Send + Sync>;
 
 pub(crate) type KeyValuePair = (String, String);
 
-pub(crate) type CompleteStreamEntryID = (u64, usize);
+#[derive(Debug, Clone)]
+pub(crate) struct CompleteStreamEntryID(pub(crate) u128, pub(crate) usize);
 
-#[derive(Debug)]
+impl CompleteStreamEntryID {
+    pub(crate) fn to_string(&self) -> String {
+        format!("{}-{}", self.0, self.1)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub(crate) enum StreamEntryID {
     Wildcard,
-    MsOnly(u64),
+    MsOnly(u128),
     Full(CompleteStreamEntryID),
 }
 

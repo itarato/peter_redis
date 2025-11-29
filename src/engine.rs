@@ -4,7 +4,7 @@ use tokio::sync::{Notify, RwLock};
 
 use crate::{
     commands::Command,
-    common::{current_time_secs_f64, Error, KeyValuePair},
+    common::{current_time_secs_f64, Error},
     database::Database,
     resp::RespValue,
 };
@@ -94,7 +94,17 @@ impl Engine {
                 self.db.read().await.get_key_type_name(key).to_string(),
             )),
 
-            Command::Xadd(KeyValuePair, id, entries) => unimplemented!(),
+            Command::Xadd(key, id, entries) => {
+                match self
+                    .db
+                    .write()
+                    .await
+                    .stream_push(key.clone(), id.clone(), entries.clone())
+                {
+                    Ok(final_id) => Ok(RespValue::BulkString(final_id.to_string())),
+                    Err(err) => Ok(RespValue::SimpleError(err)),
+                }
+            }
         }
     }
 

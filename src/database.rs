@@ -1,7 +1,5 @@
 use std::collections::{HashMap, VecDeque};
 
-use tokio::stream;
-
 use crate::common::{current_time_ms, CompleteStreamEntryID, KeyValuePair, StreamEntryID};
 
 struct ValueEntry {
@@ -335,27 +333,54 @@ impl Database {
             unreachable!()
         };
 
-        let id = Self::resolve_stream_entry_id(id, stream);
+        let id = Self::resolve_stream_entry_id(id, stream)?;
 
-        stream.push_back(StreamValue::new(id, kvpairs));
+        stream.push_back(StreamValue::new(id.clone(), kvpairs));
 
         Ok(id)
     }
 
-    fn resolve_stream_entry_id(id: StreamEntryID, stream: &StreamEntry) -> CompleteStreamEntryID {
-        match id {
-            StreamEntryID::Full(id) => id,
-            StreamEntryID::MsOnly(ms) => {
+    fn resolve_stream_entry_id(
+        id: StreamEntryID,
+        stream: &StreamEntry,
+    ) -> Result<CompleteStreamEntryID, String> {
+        let ms = match &id {
+            StreamEntryID::Full(id) => id.0,
+            StreamEntryID::MsOnly(ms) => *ms,
+            StreamEntryID::Wildcard => current_time_ms(),
+        };
+
+        let seq = match id {
+            StreamEntryID::Full(id) => id.1,
+            StreamEntryID::MsOnly(_) | StreamEntryID::Wildcard => {
                 let mut max_available_idx = 0usize;
                 for entry in stream {
                     if entry.id.0 == ms && entry.id.1 >= max_available_idx {
                         max_available_idx = entry.id.1 + 1;
                     }
                 }
-                (ms, max_available_idx)
+                max_available_idx
             }
-            StreamEntryID::Wildcard => unimplemented!(),
+        };
+
+        for entry in stream {
+            if entry.id.0 > ms {
+                return Err(
+                    "The ID specified in XADD is equal or smaller than the target stream top item"
+                        .into(),
+                );
+            }
+            if entry.id.0 == ms {
+                if seq <= entry.id.1 {
+                    return Err(
+                    "The ID specified in XADD is equal or smaller than the target stream top item"
+                        .into(),
+                );
+                }
+            }
         }
+
+        Ok(CompleteStreamEntryID(ms, seq))
     }
 
     fn assert_array(&self, key: &str) -> Result<(), String> {

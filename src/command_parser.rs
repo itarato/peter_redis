@@ -1,7 +1,11 @@
 use core::f64;
 use std::vec;
 
-use crate::{commands::Command, resp::RespValue};
+use crate::{
+    commands::Command,
+    common::{CompleteStreamEntryID, StreamEntryID},
+    resp::RespValue,
+};
 
 macro_rules! to_number {
     ($t:ident, $v:expr, $name:literal) => {
@@ -191,6 +195,35 @@ impl CommandParser {
                         return Ok(Command::Type(str_items.remove(1)));
                     }
 
+                    if name.to_lowercase() == "xadd" {
+                        if items.len() < 5 {
+                            return Err("ERR wrong number of arguments for 'xadd' command".into());
+                        }
+
+                        let items_len = items.len();
+                        let mut str_items = Self::get_strings_exact(items, items_len, "xadd")?;
+
+                        str_items.remove(0); // Name.
+
+                        let key = str_items.remove(0);
+                        let id_raw = str_items.remove(0);
+
+                        if str_items.len() % 2 != 0 {
+                            return Err("ERR wrong number of arguments for 'xadd' command".into());
+                        }
+
+                        let mut kvpairs = vec![];
+                        while !str_items.is_empty() {
+                            let entry_key = str_items.remove(0);
+                            let entry_value = str_items.remove(0);
+                            kvpairs.push((entry_key, entry_value));
+                        }
+
+                        let id = Self::stream_entry_id_from_raw(&id_raw)?;
+
+                        return Ok(Command::Xadd(key, id, kvpairs));
+                    }
+
                     return Err(format!("ERR unknown command '{}'", name.to_lowercase()));
                 } else {
                     return Err("ERR wrong command type".into());
@@ -226,5 +259,28 @@ impl CommandParser {
         }
 
         Ok(out)
+    }
+
+    fn stream_entry_id_from_raw(raw: &str) -> Result<StreamEntryID, String> {
+        if raw == "*" {
+            return Ok(StreamEntryID::Wildcard);
+        }
+
+        let parts = raw.split('-').collect::<Vec<_>>();
+        if parts.len() != 2 {
+            return Err("ERR invalid stream id".into());
+        }
+
+        let ms = u128::from_str_radix(parts[0], 10)
+            .map_err(|_| "ERR invalid ms in stream entry id".to_string())?;
+
+        if parts[1] == "*" {
+            return Ok(StreamEntryID::MsOnly(ms));
+        }
+
+        let seq = usize::from_str_radix(parts[1], 10)
+            .map_err(|_| "ERR invalid seq in stream entry id".to_string())?;
+
+        Ok(StreamEntryID::Full(CompleteStreamEntryID(ms, seq)))
     }
 }
