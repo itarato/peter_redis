@@ -363,17 +363,21 @@ impl Database {
             }
         };
 
+        if ms == 0 && seq == 0 {
+            return Err("ERR The ID specified in XADD must be greater than 0-0".into());
+        }
+
         for entry in stream {
             if entry.id.0 > ms {
                 return Err(
-                    "The ID specified in XADD is equal or smaller than the target stream top item"
+                    "ERR The ID specified in XADD is equal or smaller than the target stream top item"
                         .into(),
                 );
             }
             if entry.id.0 == ms {
                 if seq <= entry.id.1 {
                     return Err(
-                    "The ID specified in XADD is equal or smaller than the target stream top item"
+                    "ERR The ID specified in XADD is equal or smaller than the target stream top item"
                         .into(),
                 );
                 }
