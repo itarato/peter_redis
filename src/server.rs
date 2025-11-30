@@ -1,4 +1,8 @@
-use std::{cell::Cell, sync::Arc};
+use std::{
+    cell::Cell,
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    sync::Arc,
+};
 
 use anyhow::Context;
 use tokio::{
@@ -16,20 +20,21 @@ use crate::{
 pub(crate) struct Server {
     engine: Arc<Engine>,
     request_counter: Cell<u64>,
+    port: u16,
 }
 
 impl Server {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(port: u16) -> Self {
         Self {
             engine: Arc::new(Engine::new()),
             request_counter: Cell::new(0),
+            port,
         }
     }
 
     pub(crate) async fn run(&self) -> Result<(), Error> {
-        let listener = TcpListener::bind("127.0.0.1:6379")
-            .await
-            .context("tcp-bind")?;
+        let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), self.port));
+        let listener = TcpListener::bind(addr).await.context("tcp-bind")?;
 
         loop {
             let (stream, _) = listener.accept().await.context("accept-tcp-connection")?;
