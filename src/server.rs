@@ -31,11 +31,11 @@ impl Server {
             .await
             .context("tcp-bind")?;
 
-        let request_count = self.request_counter.take();
-        self.request_counter.set(request_count + 1);
-
         loop {
             let (stream, _) = listener.accept().await.context("accept-tcp-connection")?;
+
+            let request_count = self.request_counter.take();
+            self.request_counter.set(request_count + 1);
 
             tokio::spawn({
                 let engine = self.engine.clone();
