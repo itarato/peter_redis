@@ -198,7 +198,10 @@ impl Engine {
                 }
             }
 
-            Command::Incr(key) => Ok(RespValue::Integer(self.db.write().await.incr(key)?)),
+            Command::Incr(key) => match self.db.write().await.incr(key) {
+                Ok(n) => Ok(RespValue::Integer(n)),
+                Err(err) => Ok(RespValue::SimpleError(err)),
+            },
         }
     }
 
