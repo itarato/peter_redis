@@ -9,6 +9,8 @@ use crate::{
     resp::RespValue,
 };
 
+const INFO_SECTIONS: [&'static str; 1] = ["replication"];
+
 enum ArrayDirection {
     Front,
     Back,
@@ -270,6 +272,21 @@ impl Engine {
                     ))
                 }
             }
+
+            Command::Info(sections) => {
+                let mut section_strs = String::new();
+                if sections.is_empty() {
+                    for section_name in INFO_SECTIONS {
+                        section_strs.push_str(&self.section_info(section_name));
+                    }
+                } else {
+                    for section_name in sections {
+                        section_strs.push_str(&self.section_info(section_name));
+                    }
+                }
+
+                Ok(RespValue::BulkString(section_strs))
+            }
         }
     }
 
@@ -405,5 +422,12 @@ impl Engine {
             .lock()
             .await
             .contains_key(&request_count)
+    }
+
+    fn section_info(&self, section: &str) -> String {
+        match section {
+            "replication" => "# Replication\r\nrole:master\r\n\r\n".to_string(),
+            _ => String::new(),
+        }
     }
 }

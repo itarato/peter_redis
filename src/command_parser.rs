@@ -338,6 +338,13 @@ impl CommandParser {
                         return Ok(Command::Discard);
                     }
 
+                    if name.to_lowercase() == "info" {
+                        let items_len = items.len();
+                        let mut str_items = Self::get_strings_exact(items, items_len, "info")?;
+                        str_items.remove(0);
+                        return Ok(Command::Info(str_items));
+                    }
+
                     return Err(format!("ERR unknown command '{}'", name.to_lowercase()));
                 } else {
                     return Err("ERR wrong command type".into());

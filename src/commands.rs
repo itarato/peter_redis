@@ -24,6 +24,7 @@ pub(crate) enum Command {
     Multi,
     Exec,
     Discard,
+    Info(Vec<String>),
 }
 
 impl Command {
