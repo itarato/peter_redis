@@ -4,7 +4,7 @@ use tokio::sync::{Notify, RwLock};
 
 use crate::{
     commands::Command,
-    common::{current_time_ms, current_time_secs_f64, Error},
+    common::{current_time_ms, current_time_secs_f64, CompleteStreamEntryIDOrLatest, Error},
     database::{Database, StreamEntry},
     resp::RespValue,
 };
@@ -114,11 +114,25 @@ impl Engine {
                     return Ok(RespValue::NullBulkString);
                 }
 
+                let start = match start {
+                    CompleteStreamEntryIDOrLatest::Fixed(v) => v,
+                    CompleteStreamEntryIDOrLatest::Latest => {
+                        &self.db.read().await.resolve_latest_stream_id(key)?
+                    }
+                };
+
+                let end = match end {
+                    CompleteStreamEntryIDOrLatest::Fixed(v) => v,
+                    CompleteStreamEntryIDOrLatest::Latest => {
+                        &self.db.read().await.resolve_latest_stream_id(key)?
+                    }
+                };
+
                 match self
                     .db
                     .read()
                     .await
-                    .stream_get_range(key, start.clone(), end.clone(), *count)
+                    .stream_get_range(key, start, end, *count)
                 {
                     Ok(stream_entry) => Ok(Self::stream_to_resp(stream_entry)),
                     Err(err) => Ok(RespValue::SimpleError(err)),
@@ -128,12 +142,24 @@ impl Engine {
             Command::Xread(key_id_pairs, count, blocking_ttl) => {
                 let end_ms = current_time_ms() + blocking_ttl.unwrap_or(0);
 
+                // Resolve any `Latest` ids here in the async context (await is allowed).
+                let mut resolved_key_id_pairs = vec![];
+                for (key, id) in key_id_pairs {
+                    let id = match id {
+                        CompleteStreamEntryIDOrLatest::Fixed(v) => v,
+                        CompleteStreamEntryIDOrLatest::Latest => {
+                            &self.db.read().await.resolve_latest_stream_id(&key)?
+                        }
+                    };
+                    resolved_key_id_pairs.push((key.clone(), id.clone()));
+                }
+
                 loop {
                     match self
                         .db
                         .read()
                         .await
-                        .stream_read_multi_from_id_exclusive(key_id_pairs.clone(), *count)
+                        .stream_read_multi_from_id_exclusive(&resolved_key_id_pairs, *count)
                     {
                         Ok(result) => {
                             if !result.is_empty() || blocking_ttl.is_none() {

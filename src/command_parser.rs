@@ -3,7 +3,7 @@ use std::{u128, usize, vec};
 
 use crate::{
     commands::Command,
-    common::{CompleteStreamEntryID, StreamEntryID},
+    common::{CompleteStreamEntryID, CompleteStreamEntryIDOrLatest, StreamEntryID},
     resp::RespValue,
 };
 
@@ -373,27 +373,35 @@ impl CommandParser {
     fn stream_range_id_from_raw(
         raw: &str,
         default_seq: usize,
-    ) -> Result<CompleteStreamEntryID, String> {
+    ) -> Result<CompleteStreamEntryIDOrLatest, String> {
         if raw == "-" {
-            return Ok(CompleteStreamEntryID(0, 1));
+            return Ok(CompleteStreamEntryIDOrLatest::Fixed(CompleteStreamEntryID(
+                0, 1,
+            )));
         }
         if raw == "+" {
-            return Ok(CompleteStreamEntryID(u128::MAX, usize::MAX));
+            return Ok(CompleteStreamEntryIDOrLatest::Fixed(CompleteStreamEntryID(
+                u128::MAX,
+                usize::MAX,
+            )));
+        }
+        if raw == "$" {
+            return Ok(CompleteStreamEntryIDOrLatest::Latest);
         }
 
         let parts = raw.split('-').collect::<Vec<_>>();
         if parts.len() == 1 {
-            return Ok(CompleteStreamEntryID(
+            return Ok(CompleteStreamEntryIDOrLatest::Fixed(CompleteStreamEntryID(
                 to_number!(u128, parts[0], "xrange"),
                 default_seq,
-            ));
+            )));
         }
 
         if parts.len() == 2 {
-            return Ok(CompleteStreamEntryID(
+            return Ok(CompleteStreamEntryIDOrLatest::Fixed(CompleteStreamEntryID(
                 to_number!(u128, parts[0], "xrange"),
                 to_number!(usize, parts[1], "xrange"),
-            ));
+            )));
         }
 
         Err("ERR invalid ms in stream entry id".to_string())

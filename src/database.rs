@@ -343,8 +343,8 @@ impl Database {
     pub(crate) fn stream_get_range(
         &self,
         key: &str,
-        start: CompleteStreamEntryID,
-        end: CompleteStreamEntryID,
+        start: &CompleteStreamEntryID,
+        end: &CompleteStreamEntryID,
         count: usize,
     ) -> Result<Vec<StreamValue>, String> {
         self.stream_read_single_from_id_exclusive(key, start, true, end, true, count)
@@ -352,7 +352,7 @@ impl Database {
 
     pub(crate) fn stream_read_multi_from_id_exclusive(
         &self,
-        key_id_pairs: Vec<(String, CompleteStreamEntryID)>,
+        key_id_pairs: &Vec<(String, CompleteStreamEntryID)>,
         count: usize,
     ) -> Result<Vec<(String, Vec<StreamValue>)>, String> {
         let mut streams = vec![];
@@ -362,25 +362,46 @@ impl Database {
                 &key,
                 start,
                 false,
-                CompleteStreamEntryID::max(),
+                &CompleteStreamEntryID::max(),
                 true,
                 count,
             )?;
 
             if !stream.is_empty() {
-                streams.push((key, stream));
+                streams.push((key.clone(), stream));
             }
         }
 
         Ok(streams)
     }
 
+    pub(crate) fn resolve_latest_stream_id(
+        &self,
+        key: &str,
+    ) -> Result<CompleteStreamEntryID, String> {
+        self.assert_stream(&key)?;
+
+        if !self.dict.contains_key(key) {
+            return Ok(CompleteStreamEntryID(0, 0));
+        }
+
+        let Entry::Stream(stream) = self.dict.get(key).unwrap() else {
+            unreachable!()
+        };
+
+        if stream.is_empty() {
+            return Ok(CompleteStreamEntryID(0, 0));
+        }
+
+        Ok(stream.last().unwrap().id.clone())
+    }
+
     fn stream_read_single_from_id_exclusive(
         &self,
         key: &str,
-        start: CompleteStreamEntryID,
+        start: &CompleteStreamEntryID,
         start_inclusive: bool,
-        end: CompleteStreamEntryID,
+        end: &CompleteStreamEntryID,
         end_inclusive: bool,
         count: usize,
     ) -> Result<Vec<StreamValue>, String> {
@@ -400,8 +421,8 @@ impl Database {
                 break;
             }
 
-            if ((start_inclusive && elem.id >= start) || (!start_inclusive && elem.id > start))
-                && ((end_inclusive && elem.id <= end) || (!end_inclusive && elem.id < end))
+            if ((start_inclusive && &elem.id >= start) || (!start_inclusive && &elem.id > start))
+                && ((end_inclusive && &elem.id <= end) || (!end_inclusive && &elem.id < end))
             {
                 out.push(elem.clone());
             }

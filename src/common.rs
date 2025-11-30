@@ -14,6 +14,12 @@ pub(crate) type KeyValuePair = (String, String);
 #[derive(Debug, Clone, PartialEq, Eq, Ord)]
 pub(crate) struct CompleteStreamEntryID(pub(crate) u128, pub(crate) usize);
 
+#[derive(Debug, Clone)]
+pub(crate) enum CompleteStreamEntryIDOrLatest {
+    Fixed(CompleteStreamEntryID),
+    Latest,
+}
+
 impl CompleteStreamEntryID {
     pub(crate) fn to_string(&self) -> String {
         format!("{}-{}", self.0, self.1)
