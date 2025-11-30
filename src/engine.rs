@@ -251,9 +251,7 @@ impl Engine {
 
                         Ok(RespValue::Array(results))
                     }
-                    None => Ok(RespValue::SimpleString(
-                        "ERR EXEC without MULTI".to_string(),
-                    )),
+                    None => Ok(RespValue::SimpleError("ERR EXEC without MULTI".to_string())),
                 }
             }
         }
