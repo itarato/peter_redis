@@ -23,6 +23,7 @@ pub(crate) enum Command {
     Incr(String),
     Multi,
     Exec,
+    Discard,
 }
 
 impl Command {
@@ -36,6 +37,13 @@ impl Command {
     pub(crate) fn is_multi(&self) -> bool {
         match self {
             Command::Multi => true,
+            _ => false,
+        }
+    }
+
+    pub(crate) fn is_discard(&self) -> bool {
+        match self {
+            Command::Discard => true,
             _ => false,
         }
     }

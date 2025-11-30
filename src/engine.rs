@@ -34,16 +34,18 @@ impl Engine {
         command: &Command,
         request_count: u64,
     ) -> Result<RespValue, Error> {
-        if !command.is_exec() {
-            if let Some(transaction_store) =
-                self.transaction_store.lock().await.get_mut(&request_count)
-            {
+        if !command.is_exec() && !command.is_discard() {
+            if self.is_transaction(request_count).await {
                 return if command.is_multi() {
                     Ok(RespValue::SimpleString(
                         "ERR MULTI calls can not be nested".to_string(),
                     ))
                 } else {
-                    transaction_store.push(command.clone());
+                    {
+                        let mut transaction_store = self.transaction_store.lock().await;
+                        let transactions = transaction_store.get_mut(&request_count).unwrap();
+                        transactions.push(command.clone());
+                    }
                     Ok(RespValue::SimpleString("QUEUED".to_string()))
                 };
             }
@@ -254,6 +256,20 @@ impl Engine {
                     None => Ok(RespValue::SimpleError("ERR EXEC without MULTI".to_string())),
                 }
             }
+
+            Command::Discard => {
+                if self.is_transaction(request_count).await {
+                    {
+                        let mut transaction_store = self.transaction_store.lock().await;
+                        transaction_store.remove(&request_count);
+                    }
+                    Ok(RespValue::SimpleString("OK".to_string()))
+                } else {
+                    Ok(RespValue::SimpleError(
+                        "ERR DISCARD without MULTI".to_string(),
+                    ))
+                }
+            }
         }
     }
 
@@ -382,5 +398,12 @@ impl Engine {
 
             self.notification.notified().await;
         }
+    }
+
+    async fn is_transaction(&self, request_count: u64) -> bool {
+        self.transaction_store
+            .lock()
+            .await
+            .contains_key(&request_count)
     }
 }

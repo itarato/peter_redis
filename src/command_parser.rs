@@ -329,6 +329,15 @@ impl CommandParser {
                         return Ok(Command::Exec);
                     }
 
+                    if name.to_lowercase() == "discard" {
+                        if items.len() != 1 {
+                            return Err(
+                                "ERR wrong number of arguments for 'discard' command".into()
+                            );
+                        }
+                        return Ok(Command::Discard);
+                    }
+
                     return Err(format!("ERR unknown command '{}'", name.to_lowercase()));
                 } else {
                     return Err("ERR wrong command type".into());
