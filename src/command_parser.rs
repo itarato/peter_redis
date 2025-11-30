@@ -3,7 +3,7 @@ use std::{u128, usize, vec};
 
 use crate::{
     commands::Command,
-    common::{CompleteStreamEntryID, CompleteStreamEntryIDOrLatest, StreamEntryID},
+    common::{CompleteStreamEntryID, RangeStreamEntryID, StreamEntryID},
     resp::RespValue,
 };
 
@@ -310,6 +310,11 @@ impl CommandParser {
                         return Ok(Command::Xread(key_and_ids, count, blocking_ttl));
                     }
 
+                    if name.to_lowercase() == "incr" {
+                        let mut str_items = Self::get_strings_exact(items, 2, "incr")?;
+                        return Ok(Command::Incr(str_items.remove(1)));
+                    }
+
                     return Err(format!("ERR unknown command '{}'", name.to_lowercase()));
                 } else {
                     return Err("ERR wrong command type".into());
@@ -373,32 +378,30 @@ impl CommandParser {
     fn stream_range_id_from_raw(
         raw: &str,
         default_seq: usize,
-    ) -> Result<CompleteStreamEntryIDOrLatest, String> {
+    ) -> Result<RangeStreamEntryID, String> {
         if raw == "-" {
-            return Ok(CompleteStreamEntryIDOrLatest::Fixed(CompleteStreamEntryID(
-                0, 1,
-            )));
+            return Ok(RangeStreamEntryID::Fixed(CompleteStreamEntryID(0, 1)));
         }
         if raw == "+" {
-            return Ok(CompleteStreamEntryIDOrLatest::Fixed(CompleteStreamEntryID(
+            return Ok(RangeStreamEntryID::Fixed(CompleteStreamEntryID(
                 u128::MAX,
                 usize::MAX,
             )));
         }
         if raw == "$" {
-            return Ok(CompleteStreamEntryIDOrLatest::Latest);
+            return Ok(RangeStreamEntryID::Latest);
         }
 
         let parts = raw.split('-').collect::<Vec<_>>();
         if parts.len() == 1 {
-            return Ok(CompleteStreamEntryIDOrLatest::Fixed(CompleteStreamEntryID(
+            return Ok(RangeStreamEntryID::Fixed(CompleteStreamEntryID(
                 to_number!(u128, parts[0], "xrange"),
                 default_seq,
             )));
         }
 
         if parts.len() == 2 {
-            return Ok(CompleteStreamEntryIDOrLatest::Fixed(CompleteStreamEntryID(
+            return Ok(RangeStreamEntryID::Fixed(CompleteStreamEntryID(
                 to_number!(u128, parts[0], "xrange"),
                 to_number!(usize, parts[1], "xrange"),
             )));

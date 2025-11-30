@@ -396,6 +396,29 @@ impl Database {
         Ok(stream.last().unwrap().id.clone())
     }
 
+    pub(crate) fn incr(&mut self, key: &str) -> Result<i64, String> {
+        self.assert_single_value(key)?;
+
+        let Entry::Value(value_entry) =
+            self.dict
+                .entry(key.to_string())
+                .or_insert(Entry::Value(ValueEntry {
+                    value: "0".to_string(),
+                    expiry_timestamp_ms: None,
+                }))
+        else {
+            unreachable!()
+        };
+
+        let num = i64::from_str_radix(&value_entry.value, 10)
+            .map_err(|_| "ERR value is not an integer or out of range".to_string())?
+            + 1;
+
+        value_entry.value = num.to_string();
+
+        Ok(num)
+    }
+
     fn stream_read_single_from_id_exclusive(
         &self,
         key: &str,
@@ -487,7 +510,7 @@ impl Database {
         Ok(())
     }
 
-    fn assert_single_value(&self, key: &String) -> Result<(), String> {
+    fn assert_single_value(&self, key: &str) -> Result<(), String> {
         if self.dict.contains_key(key) {
             if !self.dict.get(key).map(|v| v.is_value()).unwrap() {
                 return Err(

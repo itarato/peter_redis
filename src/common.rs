@@ -15,7 +15,7 @@ pub(crate) type KeyValuePair = (String, String);
 pub(crate) struct CompleteStreamEntryID(pub(crate) u128, pub(crate) usize);
 
 #[derive(Debug, Clone)]
-pub(crate) enum CompleteStreamEntryIDOrLatest {
+pub(crate) enum RangeStreamEntryID {
     Fixed(CompleteStreamEntryID),
     Latest,
 }

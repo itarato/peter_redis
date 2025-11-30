@@ -4,7 +4,7 @@ use tokio::sync::{Notify, RwLock};
 
 use crate::{
     commands::Command,
-    common::{current_time_ms, current_time_secs_f64, CompleteStreamEntryIDOrLatest, Error},
+    common::{current_time_ms, current_time_secs_f64, Error, RangeStreamEntryID},
     database::{Database, StreamEntry},
     resp::RespValue,
 };
@@ -115,15 +115,15 @@ impl Engine {
                 }
 
                 let start = match start {
-                    CompleteStreamEntryIDOrLatest::Fixed(v) => v,
-                    CompleteStreamEntryIDOrLatest::Latest => {
+                    RangeStreamEntryID::Fixed(v) => v,
+                    RangeStreamEntryID::Latest => {
                         &self.db.read().await.resolve_latest_stream_id(key)?
                     }
                 };
 
                 let end = match end {
-                    CompleteStreamEntryIDOrLatest::Fixed(v) => v,
-                    CompleteStreamEntryIDOrLatest::Latest => {
+                    RangeStreamEntryID::Fixed(v) => v,
+                    RangeStreamEntryID::Latest => {
                         &self.db.read().await.resolve_latest_stream_id(key)?
                     }
                 };
@@ -146,8 +146,8 @@ impl Engine {
                 let mut resolved_key_id_pairs = vec![];
                 for (key, id) in key_id_pairs {
                     let id = match id {
-                        CompleteStreamEntryIDOrLatest::Fixed(v) => v,
-                        CompleteStreamEntryIDOrLatest::Latest => {
+                        RangeStreamEntryID::Fixed(v) => v,
+                        RangeStreamEntryID::Latest => {
                             &self.db.read().await.resolve_latest_stream_id(&key)?
                         }
                     };
@@ -197,6 +197,8 @@ impl Engine {
                     self.notification.notified().await;
                 }
             }
+
+            Command::Incr(key) => Ok(RespValue::Integer(self.db.write().await.incr(key)?)),
         }
     }
 

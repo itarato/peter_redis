@@ -1,4 +1,4 @@
-use crate::common::{CompleteStreamEntryIDOrLatest, KeyValuePair, StreamEntryID};
+use crate::common::{KeyValuePair, RangeStreamEntryID, StreamEntryID};
 
 #[derive(Debug)]
 pub(crate) enum Command {
@@ -18,15 +18,7 @@ pub(crate) enum Command {
     Brpop(Vec<String>, f64),
     Type(String),
     Xadd(String, StreamEntryID, Vec<KeyValuePair>),
-    Xrange(
-        String,
-        CompleteStreamEntryIDOrLatest,
-        CompleteStreamEntryIDOrLatest,
-        usize,
-    ),
-    Xread(
-        Vec<(String, CompleteStreamEntryIDOrLatest)>,
-        usize,
-        Option<u128>,
-    ),
+    Xrange(String, RangeStreamEntryID, RangeStreamEntryID, usize),
+    Xread(Vec<(String, RangeStreamEntryID)>, usize, Option<u128>),
+    Incr(String),
 }
