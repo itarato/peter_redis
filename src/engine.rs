@@ -1,6 +1,6 @@
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use tokio::sync::{Notify, RwLock};
+use tokio::sync::{Mutex, Notify, RwLock};
 
 use crate::{
     commands::Command,
@@ -17,6 +17,7 @@ enum ArrayDirection {
 pub(crate) struct Engine {
     db: RwLock<Database>,
     notification: Arc<Notify>,
+    transaction_store: Mutex<HashMap<u64, Vec<Command>>>,
 }
 
 impl Engine {
@@ -24,10 +25,34 @@ impl Engine {
         Self {
             db: RwLock::new(Database::new()),
             notification: Arc::new(Notify::new()),
+            transaction_store: Mutex::new(HashMap::new()),
         }
     }
 
-    pub(crate) async fn execute(&self, command: &Command) -> Result<RespValue, Error> {
+    pub(crate) async fn execute(
+        &self,
+        command: &Command,
+        request_count: u64,
+    ) -> Result<RespValue, Error> {
+        if !command.is_exec() {
+            if let Some(transaction_store) =
+                self.transaction_store.lock().await.get_mut(&request_count)
+            {
+                return if command.is_multi() {
+                    Ok(RespValue::SimpleString(
+                        "ERR MULTI calls can not be nested".to_string(),
+                    ))
+                } else {
+                    transaction_store.push(command.clone());
+                    Ok(RespValue::SimpleString("QUEUED".to_string()))
+                };
+            }
+        }
+
+        self.execute_now(command, request_count).await
+    }
+
+    async fn execute_now(&self, command: &Command, request_count: u64) -> Result<RespValue, Error> {
         match command {
             Command::Ping => Ok(RespValue::SimpleString("PONG".to_string())),
 
@@ -202,6 +227,35 @@ impl Engine {
                 Ok(n) => Ok(RespValue::Integer(n)),
                 Err(err) => Ok(RespValue::SimpleError(err)),
             },
+
+            Command::Multi => {
+                self.transaction_store
+                    .lock()
+                    .await
+                    .insert(request_count, vec![]);
+                Ok(RespValue::SimpleString("OK".to_string()))
+            }
+
+            Command::Exec => {
+                let mut transaction_store = self.transaction_store.lock().await;
+
+                match transaction_store.remove(&request_count) {
+                    Some(commands) => {
+                        let mut results = vec![];
+
+                        for command in commands {
+                            let result =
+                                Box::pin(self.execute_now(&command, request_count)).await?;
+                            results.push(result);
+                        }
+
+                        Ok(RespValue::Array(results))
+                    }
+                    None => Ok(RespValue::SimpleString(
+                        "ERR EXEC without MULTI".to_string(),
+                    )),
+                }
+            }
         }
     }
 

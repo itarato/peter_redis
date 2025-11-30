@@ -315,6 +315,20 @@ impl CommandParser {
                         return Ok(Command::Incr(str_items.remove(1)));
                     }
 
+                    if name.to_lowercase() == "multi" {
+                        if items.len() != 1 {
+                            return Err("ERR wrong number of arguments for 'multi' command".into());
+                        }
+                        return Ok(Command::Multi);
+                    }
+
+                    if name.to_lowercase() == "exec" {
+                        if items.len() != 1 {
+                            return Err("ERR wrong number of arguments for 'exec' command".into());
+                        }
+                        return Ok(Command::Exec);
+                    }
+
                     return Err(format!("ERR unknown command '{}'", name.to_lowercase()));
                 } else {
                     return Err("ERR wrong command type".into());

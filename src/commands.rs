@@ -1,6 +1,6 @@
 use crate::common::{KeyValuePair, RangeStreamEntryID, StreamEntryID};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum Command {
     Ping,
     Echo(String),
@@ -21,4 +21,22 @@ pub(crate) enum Command {
     Xrange(String, RangeStreamEntryID, RangeStreamEntryID, usize),
     Xread(Vec<(String, RangeStreamEntryID)>, usize, Option<u128>),
     Incr(String),
+    Multi,
+    Exec,
+}
+
+impl Command {
+    pub(crate) fn is_exec(&self) -> bool {
+        match self {
+            Command::Exec => true,
+            _ => false,
+        }
+    }
+
+    pub(crate) fn is_multi(&self) -> bool {
+        match self {
+            Command::Multi => true,
+            _ => false,
+        }
+    }
 }

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{cell::Cell, sync::Arc};
 
 use anyhow::Context;
 use tokio::{
@@ -15,12 +15,14 @@ use crate::{
 
 pub(crate) struct Server {
     engine: Arc<Engine>,
+    request_counter: Cell<u64>,
 }
 
 impl Server {
     pub(crate) fn new() -> Self {
         Self {
             engine: Arc::new(Engine::new()),
+            request_counter: Cell::new(0),
         }
     }
 
@@ -29,13 +31,17 @@ impl Server {
             .await
             .context("tcp-bind")?;
 
+        let request_count = self.request_counter.take();
+        self.request_counter.set(request_count + 1);
+
         loop {
             let (stream, _) = listener.accept().await.context("accept-tcp-connection")?;
+
             tokio::spawn({
                 let engine = self.engine.clone();
 
                 async move {
-                    match Self::handle_request(stream, engine).await {
+                    match Self::handle_request(stream, engine, request_count).await {
                         Ok(_) => debug!("Request completed"),
                         Err(err) => error!("Request has failed with reason: {}", err),
                     }
@@ -44,12 +50,16 @@ impl Server {
         }
     }
 
-    async fn handle_request(mut stream: TcpStream, engine: Arc<Engine>) -> Result<(), Error> {
+    async fn handle_request(
+        mut stream: TcpStream,
+        engine: Arc<Engine>,
+        request_count: u64,
+    ) -> Result<(), Error> {
         loop {
             match read_from_tcp_stream(&mut stream).await? {
                 Some(input) => match CommandParser::parse(input) {
                     Ok(command) => {
-                        let result = engine.execute(&command).await?;
+                        let result = engine.execute(&command, request_count).await?;
                         stream
                             .write_all(result.serialize().as_bytes())
                             .await
