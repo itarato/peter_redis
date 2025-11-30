@@ -21,7 +21,7 @@ impl StreamValue {
     }
 }
 
-type StreamEntry = VecDeque<StreamValue>;
+pub(crate) type StreamEntry = Vec<StreamValue>;
 
 enum Entry {
     Value(ValueEntry),
@@ -328,17 +328,14 @@ impl Database {
     ) -> Result<CompleteStreamEntryID, String> {
         self.assert_stream(&key)?;
 
-        let stream = self
-            .dict
-            .entry(key)
-            .or_insert(Entry::Stream(VecDeque::new()));
+        let stream = self.dict.entry(key).or_insert(Entry::Stream(Vec::new()));
         let Entry::Stream(stream) = stream else {
             unreachable!()
         };
 
         let id = Self::resolve_stream_entry_id(id, stream)?;
 
-        stream.push_back(StreamValue::new(id.clone(), kvpairs));
+        stream.push(StreamValue::new(id.clone(), kvpairs));
 
         Ok(id)
     }
@@ -369,7 +366,10 @@ impl Database {
                 true,
                 count,
             )?;
-            streams.push((key, stream));
+
+            if !stream.is_empty() {
+                streams.push((key, stream));
+            }
         }
 
         Ok(streams)

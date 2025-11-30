@@ -262,13 +262,22 @@ impl CommandParser {
                         let mut str_items = Self::get_strings_exact(items, items_len, "xread")?;
                         str_items.remove(0); // Name.
 
-                        let count = if str_items[0].to_lowercase() == "count" {
-                            str_items.remove(0); // Word "count".
-                            let count_raw = str_items.remove(0);
-                            to_number!(usize, &count_raw, "xread")
-                        } else {
-                            usize::MAX
-                        };
+                        let mut count = usize::MAX;
+                        let mut blocking_ttl = None;
+
+                        while str_items.len() >= 2 && str_items[0] != "streams" {
+                            let setting_name = str_items.remove(0);
+
+                            if setting_name.to_lowercase() == "count" {
+                                let count_raw = str_items.remove(0);
+                                count = to_number!(usize, &count_raw, "xread");
+                            } else if setting_name.to_lowercase() == "block" {
+                                let blocking_ttl_raw = str_items.remove(0);
+                                blocking_ttl = Some(to_number!(u128, &blocking_ttl_raw, "xread"));
+                            } else {
+                                return Err("ERR invalid setting for 'xread' command".into());
+                            }
+                        }
 
                         if str_items.is_empty() || str_items[0].to_lowercase() != "streams" {
                             return Err("ERR missing 'STREAMS' from 'xread' command".into());
@@ -291,7 +300,7 @@ impl CommandParser {
 
                         let key_and_ids = keys.into_iter().zip(ids).collect::<Vec<_>>();
 
-                        return Ok(Command::Xread(key_and_ids, count));
+                        return Ok(Command::Xread(key_and_ids, count, blocking_ttl));
                     }
 
                     return Err(format!("ERR unknown command '{}'", name.to_lowercase()));

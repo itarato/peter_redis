@@ -4,8 +4,8 @@ use tokio::sync::{Notify, RwLock};
 
 use crate::{
     commands::Command,
-    common::{current_time_secs_f64, Error},
-    database::Database,
+    common::{current_time_ms, current_time_secs_f64, Error},
+    database::{Database, StreamEntry},
     resp::RespValue,
 };
 
@@ -16,14 +16,14 @@ enum ArrayDirection {
 
 pub(crate) struct Engine {
     db: RwLock<Database>,
-    list_notification: Arc<Notify>,
+    notification: Arc<Notify>,
 }
 
 impl Engine {
     pub(crate) fn new() -> Self {
         Self {
             db: RwLock::new(Database::new()),
-            list_notification: Arc::new(Notify::new()),
+            notification: Arc::new(Notify::new()),
         }
     }
 
@@ -101,7 +101,10 @@ impl Engine {
                     .await
                     .stream_push(key.clone(), id.clone(), entries.clone())
                 {
-                    Ok(final_id) => Ok(RespValue::BulkString(final_id.to_string())),
+                    Ok(final_id) => {
+                        self.notification.notify_one();
+                        Ok(RespValue::BulkString(final_id.to_string()))
+                    }
                     Err(err) => Ok(RespValue::SimpleError(err)),
                 }
             }
@@ -117,74 +120,83 @@ impl Engine {
                     .await
                     .stream_get_range(key, start.clone(), end.clone(), *count)
                 {
-                    Ok(list) => Ok(RespValue::Array(
-                        list.into_iter()
-                            .map(|value| {
-                                RespValue::Array(vec![
-                                    RespValue::BulkString(value.id.to_string()),
-                                    RespValue::Array(
-                                        value
-                                            .kvpairs
-                                            .into_iter()
-                                            .flat_map(|kvpair| {
-                                                vec![
-                                                    RespValue::BulkString(kvpair.0),
-                                                    RespValue::BulkString(kvpair.1),
-                                                ]
-                                            })
-                                            .collect::<Vec<_>>(),
-                                    ),
-                                ])
-                            })
-                            .collect::<Vec<_>>(),
-                    )),
+                    Ok(stream_entry) => Ok(Self::stream_to_resp(stream_entry)),
                     Err(err) => Ok(RespValue::SimpleError(err)),
                 }
             }
 
-            Command::Xread(key_id_pairs, count) => {
-                match self
-                    .db
-                    .read()
-                    .await
-                    .stream_read_multi_from_id_exclusive(key_id_pairs.clone(), *count)
-                {
-                    Ok(result) => Ok(RespValue::Array(
-                        result
-                            .into_iter()
-                            .map(|(key, stream)| {
-                                RespValue::Array(vec![
-                                    RespValue::BulkString(key),
-                                    RespValue::Array(
-                                        stream
-                                            .into_iter()
-                                            .map(|value| {
-                                                RespValue::Array(vec![
-                                                    RespValue::BulkString(value.id.to_string()),
-                                                    RespValue::Array(
-                                                        value
-                                                            .kvpairs
-                                                            .into_iter()
-                                                            .flat_map(|kvpair| {
-                                                                vec![
-                                                                    RespValue::BulkString(kvpair.0),
-                                                                    RespValue::BulkString(kvpair.1),
-                                                                ]
-                                                            })
-                                                            .collect::<Vec<_>>(),
-                                                    ),
-                                                ])
-                                            })
-                                            .collect::<Vec<_>>(),
-                                    ),
-                                ])
-                            })
-                            .collect::<Vec<_>>(),
-                    )),
-                    Err(err) => Ok(RespValue::SimpleError(err)),
+            Command::Xread(key_id_pairs, count, blocking_ttl) => {
+                let end_ms = current_time_ms() + blocking_ttl.unwrap_or(0);
+
+                loop {
+                    match self
+                        .db
+                        .read()
+                        .await
+                        .stream_read_multi_from_id_exclusive(key_id_pairs.clone(), *count)
+                    {
+                        Ok(result) => {
+                            if !result.is_empty() || blocking_ttl.is_none() {
+                                return Ok(RespValue::Array(
+                                    result
+                                        .into_iter()
+                                        .map(|(key, stream_entry)| {
+                                            RespValue::Array(vec![
+                                                RespValue::BulkString(key),
+                                                Self::stream_to_resp(stream_entry),
+                                            ])
+                                        })
+                                        .collect::<Vec<_>>(),
+                                ));
+                            }
+                        }
+                        Err(err) => return Ok(RespValue::SimpleError(err)),
+                    }
+
+                    let now_ms = current_time_ms();
+                    if end_ms <= now_ms {
+                        return Ok(RespValue::NullArray);
+                    }
+                    let ttl = end_ms - now_ms;
+
+                    tokio::spawn({
+                        let notification = self.notification.clone();
+
+                        async move {
+                            tokio::time::sleep(Duration::from_millis(ttl as u64)).await;
+                            notification.notify_waiters();
+                        }
+                    });
+
+                    self.notification.notified().await;
                 }
             }
         }
+    }
+
+    fn stream_to_resp(stream_entry: StreamEntry) -> RespValue {
+        RespValue::Array(
+            stream_entry
+                .into_iter()
+                .map(|value| {
+                    RespValue::Array(vec![
+                        RespValue::BulkString(value.id.to_string()),
+                        RespValue::Array(
+                            value
+                                .kvpairs
+                                .into_iter()
+                                .flat_map(|kvpair| {
+                                    vec![
+                                        RespValue::BulkString(kvpair.0),
+                                        RespValue::BulkString(kvpair.1),
+                                    ]
+                                })
+                                .collect::<Vec<_>>(),
+                        ),
+                    ])
+                })
+                .collect::<Vec<_>>(),
+        )
     }
 
     async fn push(
@@ -207,7 +219,7 @@ impl Engine {
         };
         match result {
             Ok(count) => {
-                self.list_notification.notify_one();
+                self.notification.notify_one();
                 Ok(RespValue::Integer(count as i64))
             }
             Err(err) => Ok(RespValue::SimpleError(err)),
@@ -277,7 +289,7 @@ impl Engine {
             }
 
             tokio::spawn({
-                let notification = self.list_notification.clone();
+                let notification = self.notification.clone();
 
                 async move {
                     tokio::time::sleep(Duration::from_secs_f64(ttl)).await;
@@ -285,7 +297,7 @@ impl Engine {
                 }
             });
 
-            self.list_notification.notified().await;
+            self.notification.notified().await;
         }
     }
 }
