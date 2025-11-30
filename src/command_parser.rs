@@ -273,7 +273,14 @@ impl CommandParser {
                                 count = to_number!(usize, &count_raw, "xread");
                             } else if setting_name.to_lowercase() == "block" {
                                 let blocking_ttl_raw = str_items.remove(0);
-                                blocking_ttl = Some(to_number!(u128, &blocking_ttl_raw, "xread"));
+                                let mut blocking_ttl_value =
+                                    to_number!(u128, &blocking_ttl_raw, "xread");
+
+                                if blocking_ttl_value == 0 {
+                                    blocking_ttl_value = 1000 * 60 * 60 * 24; // 1 day;
+                                }
+
+                                blocking_ttl = Some(blocking_ttl_value);
                             } else {
                                 return Err("ERR invalid setting for 'xread' command".into());
                             }
