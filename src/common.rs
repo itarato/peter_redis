@@ -1,6 +1,8 @@
 use std::u128;
 
 use anyhow::Context;
+use rand::rng;
+use rand::RngCore;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::BufReader;
 use tokio::net::TcpStream;
@@ -9,12 +11,22 @@ use crate::resp::RespValue;
 
 pub(crate) type Error = Box<dyn std::error::Error + Send + Sync>;
 
-pub(crate) type KeyValuePair = (String, String);
-
-pub(crate) enum EngineRole {
-    ReadWrite,
-    ReadOnly,
+pub(crate) struct ReaderRole {
+    pub(crate) writer_host: String,
+    pub(crate) writer_port: u16,
 }
+
+pub(crate) struct WriterRole {
+    pub(crate) replid: String,
+    pub(crate) offset: u64,
+}
+
+pub(crate) enum ReplicationRole {
+    Reader(ReaderRole),
+    Writer(WriterRole),
+}
+
+pub(crate) type KeyValuePair = (String, String);
 
 #[derive(Debug, Clone, PartialEq, Eq, Ord)]
 pub(crate) struct CompleteStreamEntryID(pub(crate) u128, pub(crate) usize);
@@ -63,6 +75,14 @@ pub(crate) fn current_time_secs_f64() -> f64 {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("system time before UNIX EPOCH")
         .as_secs_f64()
+}
+
+pub(crate) fn new_master_replid() -> String {
+    let mut rnd = rng();
+    let mut bytes: [u8; 20] = [0; 20];
+    rnd.fill_bytes(&mut bytes);
+
+    bytes.map(|b| format!("{:x}", b)).join("")
 }
 
 pub(crate) async fn read_from_tcp_stream(

@@ -4,7 +4,10 @@ use tokio::sync::{Mutex, Notify, RwLock};
 
 use crate::{
     commands::Command,
-    common::{current_time_ms, current_time_secs_f64, EngineRole, Error, RangeStreamEntryID},
+    common::{
+        current_time_ms, current_time_secs_f64, new_master_replid, Error, RangeStreamEntryID,
+        ReaderRole, ReplicationRole, WriterRole,
+    },
     database::{Database, StreamEntry},
     resp::RespValue,
 };
@@ -20,16 +23,27 @@ pub(crate) struct Engine {
     db: RwLock<Database>,
     notification: Arc<Notify>,
     transaction_store: Mutex<HashMap<u64, Vec<Command>>>,
-    replica_of: Option<(String, u16)>,
+    replication_role: ReplicationRole,
 }
 
 impl Engine {
     pub(crate) fn new(replica_of: Option<(String, u16)>) -> Self {
+        let replication_role = match replica_of {
+            Some((host, port)) => ReplicationRole::Reader(ReaderRole {
+                writer_host: host,
+                writer_port: port,
+            }),
+            None => ReplicationRole::Writer(WriterRole {
+                replid: new_master_replid(),
+                offset: 0,
+            }),
+        };
+
         Self {
             db: RwLock::new(Database::new()),
             notification: Arc::new(Notify::new()),
             transaction_store: Mutex::new(HashMap::new()),
-            replica_of,
+            replication_role,
         }
     }
 
@@ -428,13 +442,10 @@ impl Engine {
 
     fn section_info(&self, section: &str) -> String {
         match section {
-            "replication" => {
-                if self.replica_of.is_none() {
-                    "# Replication\r\nrole:master\r\n\r\n".to_string()
-                } else {
-                    "# Replication\r\nrole:slave\r\n\r\n".to_string()
-                }
-            }
+            "replication" => match &self.replication_role {
+                ReplicationRole::Writer(role) => format!("# Replication\r\nrole:master\r\nmater_replid:{}\r\nmaster_repl_offset:{}\r\n\r\n", role.replid, role.offset),
+                ReplicationRole::Reader(_role) => "# Replication\r\nrole:slave\r\n\r\n".to_string(),
+            },
             _ => String::new(),
         }
     }
