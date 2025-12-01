@@ -443,7 +443,7 @@ impl Engine {
     fn section_info(&self, section: &str) -> String {
         match section {
             "replication" => match &self.replication_role {
-                ReplicationRole::Writer(role) => format!("# Replication\r\nrole:master\r\nmater_replid:{}\r\nmaster_repl_offset:{}\r\n\r\n", role.replid, role.offset),
+                ReplicationRole::Writer(role) => format!("# Replication\r\nrole:master\r\nmaster_replid:{}\r\nmaster_repl_offset:{}\r\n\r\n", role.replid, role.offset),
                 ReplicationRole::Reader(_role) => "# Replication\r\nrole:slave\r\n\r\n".to_string(),
             },
             _ => String::new(),
