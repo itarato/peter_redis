@@ -20,6 +20,23 @@ use clap::Parser;
 struct Args {
     #[arg(short, long, default_value_t = 6379)]
     port: u16,
+
+    #[arg(long)]
+    replicaof: Option<String>,
+}
+
+impl Args {
+    fn parsed_replica_of(&self) -> Option<(String, u16)> {
+        self.replicaof.clone().map(|raw| {
+            let parts = raw.split(' ').collect::<Vec<_>>();
+            if parts.len() != 2 {
+                panic!("Invalid replica of argument");
+            }
+
+            let replica_port = u16::from_str_radix(parts[1], 10).expect("port from argument");
+            (parts[0].to_string(), replica_port)
+        })
+    }
 }
 
 #[tokio::main]
@@ -30,7 +47,7 @@ async fn main() -> Result<(), Error> {
 
     let args = Args::parse();
 
-    let server = Server::new(args.port);
+    let server = Server::new(args.port, args.parsed_replica_of());
     server.run().await?;
 
     info!("Peter-Redis ending");

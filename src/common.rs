@@ -11,6 +11,11 @@ pub(crate) type Error = Box<dyn std::error::Error + Send + Sync>;
 
 pub(crate) type KeyValuePair = (String, String);
 
+pub(crate) enum EngineRole {
+    ReadWrite,
+    ReadOnly,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Ord)]
 pub(crate) struct CompleteStreamEntryID(pub(crate) u128, pub(crate) usize);
 

@@ -24,9 +24,9 @@ pub(crate) struct Server {
 }
 
 impl Server {
-    pub(crate) fn new(port: u16) -> Self {
+    pub(crate) fn new(port: u16, replica_of: Option<(String, u16)>) -> Self {
         Self {
-            engine: Arc::new(Engine::new()),
+            engine: Arc::new(Engine::new(replica_of)),
             request_counter: Cell::new(0),
             port,
         }
