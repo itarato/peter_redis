@@ -31,8 +31,9 @@ impl Server {
     pub(crate) async fn run(&self) -> Result<(), Error> {
         tokio::spawn({
             let engine = self.engine.clone();
+            let port = self.port;
             async move {
-                engine.init().await.unwrap();
+                engine.init(port).await.unwrap();
             }
         });
 

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::u128;
 
 use anyhow::Context;
@@ -16,14 +18,52 @@ pub(crate) struct ReaderRole {
     pub(crate) writer_port: u16,
 }
 
+#[derive(Hash, PartialEq, Eq)]
+pub(crate) enum ClientCapability {
+    Psync2,
+}
+
+impl ClientCapability {
+    pub(crate) fn from_str(raw: &str) -> Option<Self> {
+        match raw.to_lowercase().as_str() {
+            "psync2" => Some(ClientCapability::Psync2),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct ClientInfo {
+    pub(crate) port: Option<u16>,
+    pub(crate) capabilities: HashSet<ClientCapability>,
+}
+
 pub(crate) struct WriterRole {
     pub(crate) replid: String,
     pub(crate) offset: u64,
+    //                          vvv--request-count
+    pub(crate) clients: HashMap<u64, ClientInfo>,
 }
 
 pub(crate) enum ReplicationRole {
     Reader(ReaderRole),
     Writer(WriterRole),
+}
+
+impl ReplicationRole {
+    pub(crate) fn is_writer(&self) -> bool {
+        match self {
+            ReplicationRole::Writer(_) => true,
+            _ => false,
+        }
+    }
+
+    pub(crate) fn is_reader(&self) -> bool {
+        match self {
+            ReplicationRole::Reader(_) => true,
+            _ => false,
+        }
+    }
 }
 
 pub(crate) type KeyValuePair = (String, String);

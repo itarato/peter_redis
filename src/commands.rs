@@ -25,6 +25,7 @@ pub(crate) enum Command {
     Exec,
     Discard,
     Info(Vec<String>),
+    Replconf(Vec<String>),
 }
 
 impl Command {

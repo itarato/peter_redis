@@ -345,6 +345,14 @@ impl CommandParser {
                         return Ok(Command::Info(str_items));
                     }
 
+                    if name.to_lowercase() == "replconf" {
+                        let items_len = items.len();
+                        let mut str_items = Self::get_strings_exact(items, items_len, "replconf")?;
+                        str_items.remove(0);
+
+                        return Ok(Command::Replconf(str_items));
+                    }
+
                     return Err(format!("ERR unknown command '{}'", name.to_lowercase()));
                 } else {
                     return Err("ERR wrong command type".into());

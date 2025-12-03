@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, ptr::read, sync::Arc, time::Duration};
 
 use anyhow::Context;
 use tokio::{
@@ -10,8 +10,9 @@ use tokio::{
 use crate::{
     commands::Command,
     common::{
-        current_time_ms, current_time_secs_f64, new_master_replid, read_from_tcp_stream, Error,
-        RangeStreamEntryID, ReaderRole, ReplicationRole, WriterRole,
+        current_time_ms, current_time_secs_f64, new_master_replid, read_from_tcp_stream,
+        ClientCapability, ClientInfo, Error, RangeStreamEntryID, ReaderRole, ReplicationRole,
+        WriterRole,
     },
     database::{Database, StreamEntry},
     resp::RespValue,
@@ -28,7 +29,7 @@ pub(crate) struct Engine {
     db: RwLock<Database>,
     notification: Arc<Notify>,
     transaction_store: Mutex<HashMap<u64, Vec<Command>>>,
-    replication_role: ReplicationRole,
+    replication_role: RwLock<ReplicationRole>,
 }
 
 impl Engine {
@@ -41,6 +42,7 @@ impl Engine {
             None => ReplicationRole::Writer(WriterRole {
                 replid: new_master_replid(),
                 offset: 0,
+                clients: HashMap::new(),
             }),
         };
 
@@ -48,28 +50,41 @@ impl Engine {
             db: RwLock::new(Database::new()),
             notification: Arc::new(Notify::new()),
             transaction_store: Mutex::new(HashMap::new()),
-            replication_role,
+            replication_role: RwLock::new(replication_role),
         }
     }
 
-    pub(crate) async fn init(&self) -> Result<(), Error> {
-        match &self.replication_role {
-            ReplicationRole::Reader(role) => self.handshake(role).await,
-            ReplicationRole::Writer(_role) => Ok(()),
+    pub(crate) async fn init(&self, server_port: u16) -> Result<(), Error> {
+        if !self.replication_role.read().await.is_reader() {
+            return Ok(());
         }
+
+        let (writer_host, writer_port) = {
+            let ReplicationRole::Reader(ref reader) = *self.replication_role.read().await else {
+                unreachable!();
+            };
+
+            (reader.writer_host.clone(), reader.writer_port)
+        };
+
+        self.handshake(server_port, writer_host, writer_port).await
     }
 
-    pub(crate) async fn handshake(&self, role: &ReaderRole) -> Result<(), Error> {
+    pub(crate) async fn handshake(
+        &self,
+        server_port: u16,
+        writer_host: String,
+        writer_port: u16,
+    ) -> Result<(), Error> {
         let socket_addr = {
             if let Ok(addr) =
-                format!("{}:{}", role.writer_host, role.writer_port).parse::<std::net::SocketAddr>()
+                format!("{}:{}", writer_host, writer_port).parse::<std::net::SocketAddr>()
             {
                 addr
             } else {
-                let mut addrs =
-                    tokio::net::lookup_host((role.writer_host.as_str(), role.writer_port))
-                        .await
-                        .context("lookup-host")?;
+                let mut addrs = tokio::net::lookup_host((writer_host.as_str(), writer_port))
+                    .await
+                    .context("lookup-host")?;
                 addrs.next().ok_or_else(|| {
                     std::io::Error::new(
                         std::io::ErrorKind::Other,
@@ -97,6 +112,50 @@ impl Engine {
 
         let response = read_from_tcp_stream(&mut stream).await?;
         debug!("Handshake response: {:?}", response);
+
+        if response != Some(RespValue::SimpleString("PONG".to_string())) {
+            return Err("ERR unexpected response to PING handshake".into());
+        };
+
+        stream
+            .write_all(
+                RespValue::Array(vec![
+                    RespValue::BulkString("REPLCONF".into()),
+                    RespValue::BulkString("listening-port".into()),
+                    RespValue::BulkString(format!("{}", server_port)),
+                ])
+                .serialize()
+                .as_bytes(),
+            )
+            .await
+            .context("responding-to-writer")?;
+
+        let response = read_from_tcp_stream(&mut stream).await?;
+        debug!("Handshake response: {:?}", response);
+
+        if response != Some(RespValue::SimpleString("OK".to_string())) {
+            return Err("ERR unexpected response to REPLCONF handshake".into());
+        };
+
+        stream
+            .write_all(
+                RespValue::Array(vec![
+                    RespValue::BulkString("REPLCONF".into()),
+                    RespValue::BulkString("capa".into()),
+                    RespValue::BulkString("psync2".into()),
+                ])
+                .serialize()
+                .as_bytes(),
+            )
+            .await
+            .context("responding-to-writer")?;
+
+        let response = read_from_tcp_stream(&mut stream).await?;
+        debug!("Handshake response: {:?}", response);
+
+        if response != Some(RespValue::SimpleString("OK".to_string())) {
+            return Err("ERR unexpected response to REPLCONF handshake".into());
+        };
 
         Ok(())
     }
@@ -347,15 +406,63 @@ impl Engine {
                 let mut section_strs = String::new();
                 if sections.is_empty() {
                     for section_name in INFO_SECTIONS {
-                        section_strs.push_str(&self.section_info(section_name));
+                        section_strs.push_str(&self.section_info(section_name).await);
                     }
                 } else {
                     for section_name in sections {
-                        section_strs.push_str(&self.section_info(section_name));
+                        section_strs.push_str(&self.section_info(section_name).await);
                     }
                 }
 
                 Ok(RespValue::BulkString(section_strs))
+            }
+
+            Command::Replconf(args) => {
+                if self.replication_role.read().await.is_reader() {
+                    Ok(RespValue::SimpleError(
+                        "ERR writer commands on a non-writer node".into(),
+                    ))
+                } else {
+                    if args.len() == 2 && args[0].to_lowercase() == "listening-port" {
+                        let listening_port =
+                            u16::from_str_radix(&args[1], 10).expect("convert-port");
+
+                        let ReplicationRole::Writer(ref mut writer) =
+                            *self.replication_role.write().await
+                        else {
+                            unreachable!()
+                        };
+
+                        let client_info = writer
+                            .clients
+                            .entry(request_count)
+                            .or_insert(ClientInfo::default());
+                        client_info.port = Some(listening_port);
+
+                        Ok(RespValue::SimpleString("OK".into()))
+                    } else if args.len() == 2 && args[0].to_lowercase() == "capa" {
+                        let capa = ClientCapability::from_str(&args[1])
+                            .ok_or("ERR invalid client capability".to_string())?;
+
+                        let ReplicationRole::Writer(ref mut writer) =
+                            *self.replication_role.write().await
+                        else {
+                            unreachable!()
+                        };
+
+                        let client_info = writer
+                            .clients
+                            .entry(request_count)
+                            .or_insert(ClientInfo::default());
+                        client_info.capabilities.insert(capa);
+
+                        Ok(RespValue::SimpleString("OK".into()))
+                    } else {
+                        Ok(RespValue::SimpleError(
+                            "ERR unrecognized argument for 'replconf' command".into(),
+                        ))
+                    }
+                }
             }
         }
     }
@@ -494,11 +601,11 @@ impl Engine {
             .contains_key(&request_count)
     }
 
-    fn section_info(&self, section: &str) -> String {
+    async fn section_info(&self, section: &str) -> String {
         match section {
-            "replication" => match &self.replication_role {
-                ReplicationRole::Writer(role) => format!("# Replication\r\nrole:master\r\nmaster_replid:{}\r\nmaster_repl_offset:{}\r\n\r\n", role.replid, role.offset),
-                ReplicationRole::Reader(_role) => "# Replication\r\nrole:slave\r\n\r\n".to_string(),
+            "replication" => match *self.replication_role.read().await {
+                ReplicationRole::Writer(ref role) => format!("# Replication\r\nrole:master\r\nmaster_replid:{}\r\nmaster_repl_offset:{}\r\n\r\n", role.replid, role.offset),
+                ReplicationRole::Reader(ref _role) => "# Replication\r\nrole:slave\r\n\r\n".to_string(),
             },
             _ => String::new(),
         }
