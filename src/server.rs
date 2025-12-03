@@ -1,8 +1,4 @@
-use std::{
-    cell::Cell,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    sync::Arc,
-};
+use std::{cell::Cell, sync::Arc};
 
 use anyhow::Context;
 use tokio::{
@@ -33,8 +29,16 @@ impl Server {
     }
 
     pub(crate) async fn run(&self) -> Result<(), Error> {
-        let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), self.port));
-        let listener = TcpListener::bind(addr).await.context("tcp-bind")?;
+        tokio::spawn({
+            let engine = self.engine.clone();
+            async move {
+                engine.init().await.unwrap();
+            }
+        });
+
+        let listener = TcpListener::bind(format!("127.0.0.1:{}", self.port))
+            .await
+            .context("tcp-bind")?;
 
         loop {
             let (stream, _) = listener.accept().await.context("accept-tcp-connection")?;
@@ -64,6 +68,7 @@ impl Server {
             match read_from_tcp_stream(&mut stream).await? {
                 Some(input) => match CommandParser::parse(input) {
                     Ok(command) => {
+                        debug!("Received command: {:?}", command);
                         let result = engine.execute(&command, request_count).await?;
                         stream
                             .write_all(result.serialize().as_bytes())

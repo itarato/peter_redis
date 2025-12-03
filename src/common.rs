@@ -146,5 +146,8 @@ async fn read_line_from_tcp_stream(
         .read_line(&mut buf)
         .await
         .context("number-read")?;
+
+    debug!("Incoming {} bytes from TcpStream", buf.len());
+
     Ok(buf)
 }

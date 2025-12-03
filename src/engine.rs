@@ -1,12 +1,17 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use tokio::sync::{Mutex, Notify, RwLock};
+use anyhow::Context;
+use tokio::{
+    io::AsyncWriteExt,
+    net::TcpSocket,
+    sync::{Mutex, Notify, RwLock},
+};
 
 use crate::{
     commands::Command,
     common::{
-        current_time_ms, current_time_secs_f64, new_master_replid, Error, RangeStreamEntryID,
-        ReaderRole, ReplicationRole, WriterRole,
+        current_time_ms, current_time_secs_f64, new_master_replid, read_from_tcp_stream, Error,
+        RangeStreamEntryID, ReaderRole, ReplicationRole, WriterRole,
     },
     database::{Database, StreamEntry},
     resp::RespValue,
@@ -45,6 +50,55 @@ impl Engine {
             transaction_store: Mutex::new(HashMap::new()),
             replication_role,
         }
+    }
+
+    pub(crate) async fn init(&self) -> Result<(), Error> {
+        match &self.replication_role {
+            ReplicationRole::Reader(role) => self.handshake(role).await,
+            ReplicationRole::Writer(_role) => Ok(()),
+        }
+    }
+
+    pub(crate) async fn handshake(&self, role: &ReaderRole) -> Result<(), Error> {
+        let socket_addr = {
+            if let Ok(addr) =
+                format!("{}:{}", role.writer_host, role.writer_port).parse::<std::net::SocketAddr>()
+            {
+                addr
+            } else {
+                let mut addrs =
+                    tokio::net::lookup_host((role.writer_host.as_str(), role.writer_port))
+                        .await
+                        .context("lookup-host")?;
+                addrs.next().ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "failed to resolve writer address",
+                    )
+                })?
+            }
+        };
+
+        dbg!(&socket_addr);
+
+        let mut stream = TcpSocket::new_v4()?
+            .connect(socket_addr)
+            .await
+            .context("connecting-to-writer")?;
+
+        stream
+            .write_all(
+                RespValue::Array(vec![RespValue::BulkString("PING".into())])
+                    .serialize()
+                    .as_bytes(),
+            )
+            .await
+            .context("responding-to-writer")?;
+
+        let response = read_from_tcp_stream(&mut stream).await?;
+        debug!("Handshake response: {:?}", response);
+
+        Ok(())
     }
 
     pub(crate) async fn execute(
