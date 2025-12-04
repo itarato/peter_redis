@@ -74,14 +74,14 @@ impl Server {
 
                         for message in result {
                             stream
-                                .write_all(message.serialize().as_bytes())
+                                .write_all(&message.serialize())
                                 .await
                                 .context("write-simple-value-back-to-stream")?;
                         }
                     }
                     Err(err) => {
                         stream
-                            .write_all(RespValue::SimpleError(err).serialize().as_bytes())
+                            .write_all(&RespValue::SimpleError(err).serialize())
                             .await
                             .context("write-simple-value-back-to-stream")?;
                     }

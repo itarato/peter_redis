@@ -6,6 +6,7 @@ use anyhow::Context;
 use rand::rng;
 use rand::RngCore;
 use tokio::io::AsyncBufReadExt;
+use tokio::io::AsyncReadExt;
 use tokio::io::BufReader;
 use tokio::net::TcpStream;
 
@@ -196,6 +197,41 @@ async fn read_line_from_tcp_stream(
         .read_line(&mut buf)
         .await
         .context("number-read")?;
+
+    debug!("Incoming {} bytes from TcpStream", buf.len());
+
+    Ok(buf)
+}
+
+pub(crate) async fn read_bulk_bytes_from_tcp_stream(
+    stream: &mut TcpStream,
+) -> Result<Vec<u8>, Error> {
+    let mut buf_reader = BufReader::new(stream);
+
+    let mut size_raw = String::new();
+    buf_reader
+        .read_line(&mut size_raw)
+        .await
+        .context("read-bulk-bytes-size")?;
+
+    let size_raw = size_raw.trim_end();
+
+    if !size_raw.starts_with("$") {
+        return Err("Invalid start of size for bulk bytes".into());
+    }
+
+    let size = usize::from_str_radix(&size_raw[1..], 10).context("convert-size-to-usize")?;
+
+    let mut buf = Vec::with_capacity(size);
+    buf.resize(size, 0);
+    let read_size = buf_reader
+        .read_exact(&mut buf[0..size])
+        .await
+        .context("number-read")?;
+
+    if read_size != size {
+        return Err(format!("Read size mismatch. Read {}. Expected {}.", read_size, size).into());
+    }
 
     debug!("Incoming {} bytes from TcpStream", buf.len());
 

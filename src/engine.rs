@@ -10,9 +10,9 @@ use tokio::{
 use crate::{
     commands::Command,
     common::{
-        current_time_ms, current_time_secs_f64, new_master_replid, read_resp_value_from_tcp_stream,
-        ClientCapability, ClientInfo, Error, RangeStreamEntryID, ReaderRole, ReplicationRole,
-        WriterRole,
+        current_time_ms, current_time_secs_f64, new_master_replid, read_bulk_bytes_from_tcp_stream,
+        read_resp_value_from_tcp_stream, ClientCapability, ClientInfo, Error, RangeStreamEntryID,
+        ReaderRole, ReplicationRole, WriterRole,
     },
     database::{Database, StreamEntry},
     resp::RespValue,
@@ -130,19 +130,21 @@ impl Engine {
 
         stream
             .write_all(
-                RespValue::Array(vec![
+                &RespValue::Array(vec![
                     RespValue::BulkString("PSYNC".into()),
                     RespValue::BulkString("?".into()),
                     RespValue::BulkString("-1".into()),
                 ])
-                .serialize()
-                .as_bytes(),
+                .serialize(),
             )
             .await
             .context("responding-to-writer")?;
 
         let response = read_resp_value_from_tcp_stream(&mut stream).await?;
         debug!("Handshake response: {:?}", response);
+
+        let response = read_bulk_bytes_from_tcp_stream(&mut stream).await?;
+        debug!("Handshake final response: {} bytes", response.len());
 
         Ok(())
     }
@@ -477,10 +479,18 @@ impl Engine {
 
                     client_info.current_offset = *offset;
 
-                    Ok(vec![RespValue::SimpleString(format!(
-                        "FULLRESYNC {} 0",
-                        writer.replid
-                    ))])
+                    let fake_rdb_file_bytes_str = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
+                    let fake_rdb_file_bytes = (0..fake_rdb_file_bytes_str.len() / 2)
+                        .into_iter()
+                        .map(|i| {
+                            u8::from_str_radix(&fake_rdb_file_bytes_str[i..=i + 1], 16).unwrap()
+                        })
+                        .collect::<Vec<_>>();
+
+                    Ok(vec![
+                        RespValue::SimpleString(format!("FULLRESYNC {} 0", writer.replid)),
+                        RespValue::BulkBytes(fake_rdb_file_bytes),
+                    ])
                 } else {
                     Ok(vec![RespValue::SimpleError(
                         "ERR writer commands on a non-writer node".into(),
@@ -645,7 +655,7 @@ impl Engine {
         expected_response: RespValue,
     ) -> Result<(), Error> {
         stream
-            .write_all(payload.serialize().as_bytes())
+            .write_all(&payload.serialize())
             .await
             .context("responding-to-writer")?;
 
