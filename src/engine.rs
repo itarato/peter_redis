@@ -151,20 +151,20 @@ impl Engine {
         &self,
         command: &Command,
         request_count: u64,
-    ) -> Result<RespValue, Error> {
+    ) -> Result<Vec<RespValue>, Error> {
         if !command.is_exec() && !command.is_discard() {
             if self.is_transaction(request_count).await {
                 return if command.is_multi() {
-                    Ok(RespValue::SimpleString(
+                    Ok(vec![RespValue::SimpleString(
                         "ERR MULTI calls can not be nested".to_string(),
-                    ))
+                    )])
                 } else {
                     {
                         let mut transaction_store = self.transaction_store.lock().await;
                         let transactions = transaction_store.get_mut(&request_count).unwrap();
                         transactions.push(command.clone());
                     }
-                    Ok(RespValue::SimpleString("QUEUED".to_string()))
+                    Ok(vec![RespValue::SimpleString("QUEUED".to_string())])
                 };
             }
         }
@@ -172,11 +172,15 @@ impl Engine {
         self.execute_now(command, request_count).await
     }
 
-    async fn execute_now(&self, command: &Command, request_count: u64) -> Result<RespValue, Error> {
+    async fn execute_now(
+        &self,
+        command: &Command,
+        request_count: u64,
+    ) -> Result<Vec<RespValue>, Error> {
         match command {
-            Command::Ping => Ok(RespValue::SimpleString("PONG".to_string())),
+            Command::Ping => Ok(vec![RespValue::SimpleString("PONG".to_string())]),
 
-            Command::Echo(arg) => Ok(RespValue::BulkString(arg.clone())),
+            Command::Echo(arg) => Ok(vec![RespValue::BulkString(arg.clone())]),
 
             Command::Set(key, value, expiry) => {
                 match self
@@ -185,32 +189,32 @@ impl Engine {
                     .await
                     .set(key.clone(), value.clone(), expiry.clone())
                 {
-                    Ok(_) => Ok(RespValue::SimpleString("OK".into())),
-                    Err(err) => Ok(RespValue::SimpleError(err)),
+                    Ok(_) => Ok(vec![RespValue::SimpleString("OK".into())]),
+                    Err(err) => Ok(vec![RespValue::SimpleError(err)]),
                 }
             }
 
             Command::Get(key) => match self.db.read().await.get(key) {
-                Ok(Some(v)) => Ok(RespValue::BulkString(v.clone())),
-                Ok(None) => Ok(RespValue::NullBulkString),
-                Err(err) => Ok(RespValue::SimpleError(err)),
+                Ok(Some(v)) => Ok(vec![RespValue::BulkString(v.clone())]),
+                Ok(None) => Ok(vec![RespValue::NullBulkString]),
+                Err(err) => Ok(vec![RespValue::SimpleError(err)]),
             },
 
             Command::Lrange(key, start, end) => {
                 match self.db.read().await.get_list_lrange(key, *start, *end) {
-                    Ok(array) => Ok(RespValue::Array(
+                    Ok(array) => Ok(vec![RespValue::Array(
                         array
                             .into_iter()
                             .map(|elem| RespValue::BulkString(elem))
                             .collect::<Vec<_>>(),
-                    )),
-                    Err(err) => Ok(RespValue::SimpleError(err)),
+                    )]),
+                    Err(err) => Ok(vec![RespValue::SimpleError(err)]),
                 }
             }
 
             Command::Llen(key) => match self.db.read().await.list_length(key) {
-                Ok(n) => Ok(RespValue::Integer(n as i64)),
-                Err(err) => Ok(RespValue::SimpleError(err)),
+                Ok(n) => Ok(vec![RespValue::Integer(n as i64)]),
+                Err(err) => Ok(vec![RespValue::SimpleError(err)]),
             },
 
             Command::Rpush(key, values) => self.push(key, values, ArrayDirection::Back).await,
@@ -235,9 +239,9 @@ impl Engine {
                     .await
             }
 
-            Command::Type(key) => Ok(RespValue::SimpleString(
+            Command::Type(key) => Ok(vec![RespValue::SimpleString(
                 self.db.read().await.get_key_type_name(key).to_string(),
-            )),
+            )]),
 
             Command::Xadd(key, id, entries) => {
                 match self
@@ -248,15 +252,15 @@ impl Engine {
                 {
                     Ok(final_id) => {
                         self.notification.notify_one();
-                        Ok(RespValue::BulkString(final_id.to_string()))
+                        Ok(vec![RespValue::BulkString(final_id.to_string())])
                     }
-                    Err(err) => Ok(RespValue::SimpleError(err)),
+                    Err(err) => Ok(vec![RespValue::SimpleError(err)]),
                 }
             }
 
             Command::Xrange(key, start, end, count) => {
                 if *count == 0 {
-                    return Ok(RespValue::NullBulkString);
+                    return Ok(vec![RespValue::NullBulkString]);
                 }
 
                 let start = match start {
@@ -279,8 +283,8 @@ impl Engine {
                     .await
                     .stream_get_range(key, start, end, *count)
                 {
-                    Ok(stream_entry) => Ok(Self::stream_to_resp(stream_entry)),
-                    Err(err) => Ok(RespValue::SimpleError(err)),
+                    Ok(stream_entry) => Ok(vec![Self::stream_to_resp(stream_entry)]),
+                    Err(err) => Ok(vec![RespValue::SimpleError(err)]),
                 }
             }
 
@@ -308,7 +312,7 @@ impl Engine {
                     {
                         Ok(result) => {
                             if !result.is_empty() || blocking_ttl.is_none() {
-                                return Ok(RespValue::Array(
+                                return Ok(vec![RespValue::Array(
                                     result
                                         .into_iter()
                                         .map(|(key, stream_entry)| {
@@ -318,15 +322,15 @@ impl Engine {
                                             ])
                                         })
                                         .collect::<Vec<_>>(),
-                                ));
+                                )]);
                             }
                         }
-                        Err(err) => return Ok(RespValue::SimpleError(err)),
+                        Err(err) => return Ok(vec![RespValue::SimpleError(err)]),
                     }
 
                     let now_ms = current_time_ms();
                     if end_ms <= now_ms {
-                        return Ok(RespValue::NullArray);
+                        return Ok(vec![RespValue::NullArray]);
                     }
                     let ttl = end_ms - now_ms;
 
@@ -344,8 +348,8 @@ impl Engine {
             }
 
             Command::Incr(key) => match self.db.write().await.incr(key) {
-                Ok(n) => Ok(RespValue::Integer(n)),
-                Err(err) => Ok(RespValue::SimpleError(err)),
+                Ok(n) => Ok(vec![RespValue::Integer(n)]),
+                Err(err) => Ok(vec![RespValue::SimpleError(err)]),
             },
 
             Command::Multi => {
@@ -353,7 +357,7 @@ impl Engine {
                     .lock()
                     .await
                     .insert(request_count, vec![]);
-                Ok(RespValue::SimpleString("OK".to_string()))
+                Ok(vec![RespValue::SimpleString("OK".to_string())])
             }
 
             Command::Exec => {
@@ -364,14 +368,20 @@ impl Engine {
                         let mut results = vec![];
 
                         for command in commands {
-                            let result =
+                            let mut result =
                                 Box::pin(self.execute_now(&command, request_count)).await?;
-                            results.push(result);
+                            if result.len() != 1 {
+                                return Err("Unacceptable mutli command response length".into());
+                            }
+
+                            results.push(result.remove(0));
                         }
 
-                        Ok(RespValue::Array(results))
+                        Ok(vec![RespValue::Array(results)])
                     }
-                    None => Ok(RespValue::SimpleError("ERR EXEC without MULTI".to_string())),
+                    None => Ok(vec![RespValue::SimpleError(
+                        "ERR EXEC without MULTI".to_string(),
+                    )]),
                 }
             }
 
@@ -381,11 +391,11 @@ impl Engine {
                         let mut transaction_store = self.transaction_store.lock().await;
                         transaction_store.remove(&request_count);
                     }
-                    Ok(RespValue::SimpleString("OK".to_string()))
+                    Ok(vec![RespValue::SimpleString("OK".to_string())])
                 } else {
-                    Ok(RespValue::SimpleError(
+                    Ok(vec![RespValue::SimpleError(
                         "ERR DISCARD without MULTI".to_string(),
-                    ))
+                    )])
                 }
             }
 
@@ -401,7 +411,7 @@ impl Engine {
                     }
                 }
 
-                Ok(RespValue::BulkString(section_strs))
+                Ok(vec![RespValue::BulkString(section_strs)])
             }
 
             Command::Replconf(args) => {
@@ -422,7 +432,7 @@ impl Engine {
                             .or_insert(ClientInfo::new());
                         client_info.port = Some(listening_port);
 
-                        Ok(RespValue::SimpleString("OK".into()))
+                        Ok(vec![RespValue::SimpleString("OK".into())])
                     } else if args.len() == 2 && args[0].to_lowercase() == "capa" {
                         let capa = ClientCapability::from_str(&args[1])
                             .ok_or("ERR invalid client capability".to_string())?;
@@ -439,16 +449,16 @@ impl Engine {
                             .or_insert(ClientInfo::new());
                         client_info.capabilities.insert(capa);
 
-                        Ok(RespValue::SimpleString("OK".into()))
+                        Ok(vec![RespValue::SimpleString("OK".into())])
                     } else {
-                        Ok(RespValue::SimpleError(
+                        Ok(vec![RespValue::SimpleError(
                             "ERR unrecognized argument for 'replconf' command".into(),
-                        ))
+                        )])
                     }
                 } else {
-                    Ok(RespValue::SimpleError(
+                    Ok(vec![RespValue::SimpleError(
                         "ERR writer commands on a non-writer node".into(),
-                    ))
+                    )])
                 }
             }
 
@@ -467,21 +477,21 @@ impl Engine {
 
                     client_info.current_offset = *offset;
 
-                    Ok(RespValue::SimpleString(format!(
+                    Ok(vec![RespValue::SimpleString(format!(
                         "FULLRESYNC {} 0",
                         writer.replid
-                    )))
+                    ))])
                 } else {
-                    Ok(RespValue::SimpleError(
+                    Ok(vec![RespValue::SimpleError(
                         "ERR writer commands on a non-writer node".into(),
-                    ))
+                    )])
                 }
             }
 
-            Command::Unknown(msg) => Ok(RespValue::SimpleError(format!(
+            Command::Unknown(msg) => Ok(vec![RespValue::SimpleError(format!(
                 "Unrecognized command: {}",
                 msg
-            ))),
+            ))]),
         }
     }
 
@@ -515,7 +525,7 @@ impl Engine {
         key: &String,
         values: &Vec<String>,
         dir: ArrayDirection,
-    ) -> Result<RespValue, Error> {
+    ) -> Result<Vec<RespValue>, Error> {
         let result = match dir {
             ArrayDirection::Back => self
                 .db
@@ -531,21 +541,21 @@ impl Engine {
         match result {
             Ok(count) => {
                 self.notification.notify_one();
-                Ok(RespValue::Integer(count as i64))
+                Ok(vec![RespValue::Integer(count as i64)])
             }
-            Err(err) => Ok(RespValue::SimpleError(err)),
+            Err(err) => Ok(vec![RespValue::SimpleError(err)]),
         }
     }
 
-    async fn pop(&self, key: &String, dir: ArrayDirection) -> Result<RespValue, Error> {
+    async fn pop(&self, key: &String, dir: ArrayDirection) -> Result<Vec<RespValue>, Error> {
         let result = match dir {
             ArrayDirection::Back => self.db.write().await.list_pop_one_back(key),
             ArrayDirection::Front => self.db.write().await.list_pop_one_front(key),
         };
         match result {
-            Ok(Some(v)) => return Ok(RespValue::BulkString(v)),
-            Ok(None) => return Ok(RespValue::NullBulkString),
-            Err(err) => Ok(RespValue::SimpleError(err)),
+            Ok(Some(v)) => return Ok(vec![RespValue::BulkString(v)]),
+            Ok(None) => return Ok(vec![RespValue::NullBulkString]),
+            Err(err) => Ok(vec![RespValue::SimpleError(err)]),
         }
     }
 
@@ -554,20 +564,20 @@ impl Engine {
         key: &String,
         n: &usize,
         dir: ArrayDirection,
-    ) -> Result<RespValue, Error> {
+    ) -> Result<Vec<RespValue>, Error> {
         let result = match dir {
             ArrayDirection::Back => self.db.write().await.list_pop_multi_back(key, *n),
             ArrayDirection::Front => self.db.write().await.list_pop_multi_front(key, *n),
         };
         match result {
-            Ok(Some(elems)) => Ok(RespValue::Array(
+            Ok(Some(elems)) => Ok(vec![RespValue::Array(
                 elems
                     .into_iter()
                     .map(|e| RespValue::BulkString(e))
                     .collect(),
-            )),
-            Ok(None) => return Ok(RespValue::NullBulkString),
-            Err(err) => Ok(RespValue::SimpleError(err)),
+            )]),
+            Ok(None) => return Ok(vec![RespValue::NullBulkString]),
+            Err(err) => Ok(vec![RespValue::SimpleError(err)]),
         }
     }
 
@@ -576,7 +586,7 @@ impl Engine {
         keys: &Vec<String>,
         timeout_secs: &f64,
         dir: ArrayDirection,
-    ) -> Result<RespValue, Error> {
+    ) -> Result<Vec<RespValue>, Error> {
         let now_secs = current_time_secs_f64();
         let end_secs = now_secs + timeout_secs;
 
@@ -587,16 +597,16 @@ impl Engine {
                     ArrayDirection::Front => self.db.write().await.list_pop_one_front(key)?,
                 };
                 if let Some(v) = result {
-                    return Ok(RespValue::Array(vec![
+                    return Ok(vec![RespValue::Array(vec![
                         RespValue::BulkString(key.clone()),
                         RespValue::BulkString(v),
-                    ]));
+                    ])]);
                 }
             }
 
             let ttl = end_secs - current_time_secs_f64();
             if ttl <= 0.0 {
-                return Ok(RespValue::NullArray);
+                return Ok(vec![RespValue::NullArray]);
             }
 
             tokio::spawn({

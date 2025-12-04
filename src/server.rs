@@ -71,10 +71,13 @@ impl Server {
                     Ok(command) => {
                         debug!("Received command: {:?}", command);
                         let result = engine.execute(&command, request_count).await?;
-                        stream
-                            .write_all(result.serialize().as_bytes())
-                            .await
-                            .context("write-simple-value-back-to-stream")?;
+
+                        for message in result {
+                            stream
+                                .write_all(message.serialize().as_bytes())
+                                .await
+                                .context("write-simple-value-back-to-stream")?;
+                        }
                     }
                     Err(err) => {
                         stream
