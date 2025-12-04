@@ -10,7 +10,7 @@ use tokio::{
 use crate::{
     commands::Command,
     common::{
-        current_time_ms, current_time_secs_f64, new_master_replid, read_from_tcp_stream,
+        current_time_ms, current_time_secs_f64, new_master_replid, read_resp_value_from_tcp_stream,
         ClientCapability, ClientInfo, Error, RangeStreamEntryID, ReaderRole, ReplicationRole,
         WriterRole,
     },
@@ -141,7 +141,7 @@ impl Engine {
             .await
             .context("responding-to-writer")?;
 
-        let response = read_from_tcp_stream(&mut stream).await?;
+        let response = read_resp_value_from_tcp_stream(&mut stream).await?;
         debug!("Handshake response: {:?}", response);
 
         Ok(())
@@ -639,7 +639,7 @@ impl Engine {
             .await
             .context("responding-to-writer")?;
 
-        let response = read_from_tcp_stream(stream).await?;
+        let response = read_resp_value_from_tcp_stream(stream).await?;
         debug!("Handshake response: {:?}", response);
 
         if response != Some(expected_response) {

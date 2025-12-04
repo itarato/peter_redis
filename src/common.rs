@@ -135,7 +135,7 @@ pub(crate) fn new_master_replid() -> String {
     bytes.map(|b| format!("{:x}", b)).join("")
 }
 
-pub(crate) async fn read_from_tcp_stream(
+pub(crate) async fn read_resp_value_from_tcp_stream(
     stream: &mut TcpStream,
 ) -> Result<Option<RespValue>, Error> {
     let mut buf_reader = BufReader::new(stream);

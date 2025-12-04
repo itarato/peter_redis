@@ -8,7 +8,7 @@ use tokio::{
 
 use crate::{
     command_parser::CommandParser,
-    common::{read_from_tcp_stream, Error},
+    common::{read_resp_value_from_tcp_stream, Error},
     engine::Engine,
     resp::RespValue,
 };
@@ -66,7 +66,7 @@ impl Server {
         request_count: u64,
     ) -> Result<(), Error> {
         loop {
-            match read_from_tcp_stream(&mut stream).await? {
+            match read_resp_value_from_tcp_stream(&mut stream).await? {
                 Some(input) => match CommandParser::parse(input) {
                     Ok(command) => {
                         debug!("Received command: {:?}", command);
