@@ -32,10 +32,20 @@ impl ClientCapability {
     }
 }
 
-#[derive(Default)]
 pub(crate) struct ClientInfo {
     pub(crate) port: Option<u16>,
     pub(crate) capabilities: HashSet<ClientCapability>,
+    pub(crate) current_offset: i64,
+}
+
+impl ClientInfo {
+    pub(crate) fn new() -> Self {
+        Self {
+            port: None,
+            capabilities: HashSet::new(),
+            current_offset: -1,
+        }
+    }
 }
 
 pub(crate) struct WriterRole {

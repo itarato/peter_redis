@@ -1,9 +1,9 @@
-use std::{collections::HashMap, ptr::read, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use anyhow::Context;
 use tokio::{
     io::AsyncWriteExt,
-    net::TcpSocket,
+    net::{TcpSocket, TcpStream},
     sync::{Mutex, Notify, RwLock},
 };
 
@@ -94,35 +94,46 @@ impl Engine {
             }
         };
 
-        dbg!(&socket_addr);
-
         let mut stream = TcpSocket::new_v4()?
             .connect(socket_addr)
             .await
             .context("connecting-to-writer")?;
 
-        stream
-            .write_all(
-                RespValue::Array(vec![RespValue::BulkString("PING".into())])
-                    .serialize()
-                    .as_bytes(),
-            )
-            .await
-            .context("responding-to-writer")?;
+        Self::handshake_step(
+            &mut stream,
+            RespValue::Array(vec![RespValue::BulkString("PING".into())]),
+            RespValue::SimpleString("PONG".to_string()),
+        )
+        .await?;
 
-        let response = read_from_tcp_stream(&mut stream).await?;
-        debug!("Handshake response: {:?}", response);
+        Self::handshake_step(
+            &mut stream,
+            RespValue::Array(vec![
+                RespValue::BulkString("REPLCONF".into()),
+                RespValue::BulkString("listening-port".into()),
+                RespValue::BulkString(format!("{}", server_port)),
+            ]),
+            RespValue::SimpleString("OK".to_string()),
+        )
+        .await?;
 
-        if response != Some(RespValue::SimpleString("PONG".to_string())) {
-            return Err("ERR unexpected response to PING handshake".into());
-        };
+        Self::handshake_step(
+            &mut stream,
+            RespValue::Array(vec![
+                RespValue::BulkString("REPLCONF".into()),
+                RespValue::BulkString("capa".into()),
+                RespValue::BulkString("psync2".into()),
+            ]),
+            RespValue::SimpleString("OK".to_string()),
+        )
+        .await?;
 
         stream
             .write_all(
                 RespValue::Array(vec![
-                    RespValue::BulkString("REPLCONF".into()),
-                    RespValue::BulkString("listening-port".into()),
-                    RespValue::BulkString(format!("{}", server_port)),
+                    RespValue::BulkString("PSYNC".into()),
+                    RespValue::BulkString("?".into()),
+                    RespValue::BulkString("-1".into()),
                 ])
                 .serialize()
                 .as_bytes(),
@@ -132,30 +143,6 @@ impl Engine {
 
         let response = read_from_tcp_stream(&mut stream).await?;
         debug!("Handshake response: {:?}", response);
-
-        if response != Some(RespValue::SimpleString("OK".to_string())) {
-            return Err("ERR unexpected response to REPLCONF handshake".into());
-        };
-
-        stream
-            .write_all(
-                RespValue::Array(vec![
-                    RespValue::BulkString("REPLCONF".into()),
-                    RespValue::BulkString("capa".into()),
-                    RespValue::BulkString("psync2".into()),
-                ])
-                .serialize()
-                .as_bytes(),
-            )
-            .await
-            .context("responding-to-writer")?;
-
-        let response = read_from_tcp_stream(&mut stream).await?;
-        debug!("Handshake response: {:?}", response);
-
-        if response != Some(RespValue::SimpleString("OK".to_string())) {
-            return Err("ERR unexpected response to REPLCONF handshake".into());
-        };
 
         Ok(())
     }
@@ -418,11 +405,7 @@ impl Engine {
             }
 
             Command::Replconf(args) => {
-                if self.replication_role.read().await.is_reader() {
-                    Ok(RespValue::SimpleError(
-                        "ERR writer commands on a non-writer node".into(),
-                    ))
-                } else {
+                if self.replication_role.read().await.is_writer() {
                     if args.len() == 2 && args[0].to_lowercase() == "listening-port" {
                         let listening_port =
                             u16::from_str_radix(&args[1], 10).expect("convert-port");
@@ -436,7 +419,7 @@ impl Engine {
                         let client_info = writer
                             .clients
                             .entry(request_count)
-                            .or_insert(ClientInfo::default());
+                            .or_insert(ClientInfo::new());
                         client_info.port = Some(listening_port);
 
                         Ok(RespValue::SimpleString("OK".into()))
@@ -453,7 +436,7 @@ impl Engine {
                         let client_info = writer
                             .clients
                             .entry(request_count)
-                            .or_insert(ClientInfo::default());
+                            .or_insert(ClientInfo::new());
                         client_info.capabilities.insert(capa);
 
                         Ok(RespValue::SimpleString("OK".into()))
@@ -462,8 +445,43 @@ impl Engine {
                             "ERR unrecognized argument for 'replconf' command".into(),
                         ))
                     }
+                } else {
+                    Ok(RespValue::SimpleError(
+                        "ERR writer commands on a non-writer node".into(),
+                    ))
                 }
             }
+
+            Command::Psync2(_replication_id, offset) => {
+                if self.replication_role.read().await.is_writer() {
+                    let ReplicationRole::Writer(ref mut writer) =
+                        *self.replication_role.write().await
+                    else {
+                        unreachable!()
+                    };
+
+                    let client_info = writer
+                        .clients
+                        .entry(request_count)
+                        .or_insert(ClientInfo::new());
+
+                    client_info.current_offset = *offset;
+
+                    Ok(RespValue::SimpleString(format!(
+                        "FULLRESYNC {} 0",
+                        writer.replid
+                    )))
+                } else {
+                    Ok(RespValue::SimpleError(
+                        "ERR writer commands on a non-writer node".into(),
+                    ))
+                }
+            }
+
+            Command::Unknown(msg) => Ok(RespValue::SimpleError(format!(
+                "Unrecognized command: {}",
+                msg
+            ))),
         }
     }
 
@@ -609,5 +627,25 @@ impl Engine {
             },
             _ => String::new(),
         }
+    }
+
+    async fn handshake_step(
+        stream: &mut TcpStream,
+        payload: RespValue,
+        expected_response: RespValue,
+    ) -> Result<(), Error> {
+        stream
+            .write_all(payload.serialize().as_bytes())
+            .await
+            .context("responding-to-writer")?;
+
+        let response = read_from_tcp_stream(stream).await?;
+        debug!("Handshake response: {:?}", response);
+
+        if response != Some(expected_response) {
+            return Err("Unexpected response to handshake".into());
+        };
+
+        Ok(())
     }
 }

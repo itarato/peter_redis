@@ -26,6 +26,9 @@ pub(crate) enum Command {
     Discard,
     Info(Vec<String>),
     Replconf(Vec<String>),
+    Psync2(String, i64),
+    // ---
+    Unknown(String),
 }
 
 impl Command {

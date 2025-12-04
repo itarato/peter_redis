@@ -353,15 +353,21 @@ impl CommandParser {
                         return Ok(Command::Replconf(str_items));
                     }
 
-                    return Err(format!("ERR unknown command '{}'", name.to_lowercase()));
+                    if name.to_lowercase() == "psync" {
+                        let str_items = Self::get_strings_exact(items, 3, "psync")?;
+                        let replication_id = str_items[1].clone();
+                        let offset = to_number!(i64, &str_items[2], "psync");
+
+                        return Ok(Command::Psync2(replication_id, offset));
+                    }
+
+                    return Ok(Command::Unknown(name.to_lowercase()));
                 } else {
-                    return Err("ERR wrong command type".into());
+                    return Ok(Command::Unknown("not-a-string".to_string()));
                 }
             }
-            _ => {}
+            _ => return Ok(Command::Unknown("not-an-array".to_string())),
         }
-
-        Err("ERR unknown command 'asdf'".into())
     }
 
     fn get_strings_exact(
