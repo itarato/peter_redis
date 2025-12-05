@@ -483,7 +483,8 @@ impl Engine {
                     let fake_rdb_file_bytes = (0..fake_rdb_file_bytes_str.len() / 2)
                         .into_iter()
                         .map(|i| {
-                            u8::from_str_radix(&fake_rdb_file_bytes_str[i..=i + 1], 16).unwrap()
+                            u8::from_str_radix(&fake_rdb_file_bytes_str[(i * 2)..=(i * 2) + 1], 16)
+                                .unwrap()
                         })
                         .collect::<Vec<_>>();
 
