@@ -26,7 +26,7 @@ pub(crate) enum Command {
     Discard,
     Info(Vec<String>),
     Replconf(Vec<String>),
-    Psync2(String, i64),
+    Psync(String, i64),
     // ---
     Unknown(String),
 }
@@ -49,6 +49,13 @@ impl Command {
     pub(crate) fn is_discard(&self) -> bool {
         match self {
             Command::Discard => true,
+            _ => false,
+        }
+    }
+
+    pub(crate) fn is_psync(&self) -> bool {
+        match self {
+            Command::Psync(_, _) => true,
             _ => false,
         }
     }

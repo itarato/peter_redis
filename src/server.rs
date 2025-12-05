@@ -70,14 +70,7 @@ impl Server {
                 Some(input) => match CommandParser::parse(input) {
                     Ok(command) => {
                         debug!("Received command: {:?}", command);
-                        let result = engine.execute(&command, request_count).await?;
-
-                        for message in result {
-                            stream
-                                .write_all(&message.serialize())
-                                .await
-                                .context("write-simple-value-back-to-stream")?;
-                        }
+                        engine.execute(&command, request_count, &mut stream).await?;
                     }
                     Err(err) => {
                         stream

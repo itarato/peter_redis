@@ -358,7 +358,7 @@ impl CommandParser {
                         let replication_id = str_items[1].clone();
                         let offset = to_number!(i64, &str_items[2], "psync");
 
-                        return Ok(Command::Psync2(replication_id, offset));
+                        return Ok(Command::Psync(replication_id, offset));
                     }
 
                     return Ok(Command::Unknown(name.to_lowercase()));

@@ -153,36 +153,64 @@ impl Engine {
         &self,
         command: &Command,
         request_count: u64,
-    ) -> Result<Vec<RespValue>, Error> {
-        if !command.is_exec() && !command.is_discard() {
-            if self.is_transaction(request_count).await {
-                return if command.is_multi() {
-                    Ok(vec![RespValue::SimpleString(
-                        "ERR MULTI calls can not be nested".to_string(),
-                    )])
-                } else {
-                    {
-                        let mut transaction_store = self.transaction_store.lock().await;
-                        let transactions = transaction_store.get_mut(&request_count).unwrap();
-                        transactions.push(command.clone());
-                    }
-                    Ok(vec![RespValue::SimpleString("QUEUED".to_string())])
-                };
+        stream: &mut TcpStream,
+    ) -> Result<(), Error> {
+        if !command.is_exec() && !command.is_discard() && self.is_transaction(request_count).await {
+            if command.is_multi() {
+                stream
+                    .write_all(
+                        &RespValue::SimpleString("ERR MULTI calls can not be nested".to_string())
+                            .serialize(),
+                    )
+                    .await
+                    .context("write-simple-value-back-to-stream")?;
+            } else {
+                {
+                    let mut transaction_store = self.transaction_store.lock().await;
+                    let transactions = transaction_store.get_mut(&request_count).unwrap();
+                    transactions.push(command.clone());
+                }
+
+                stream
+                    .write_all(&RespValue::SimpleString("QUEUED".to_string()).serialize())
+                    .await
+                    .context("write-simple-value-back-to-stream")?;
             }
+        } else if command.is_psync() {
+            self.psync(stream, request_count, command).await?;
+        } else {
+            self.execute_and_reply(command, request_count, stream)
+                .await?;
         }
 
-        self.execute_now(command, request_count).await
+        Ok(())
     }
 
-    async fn execute_now(
+    async fn execute_and_reply(
         &self,
         command: &Command,
         request_count: u64,
-    ) -> Result<Vec<RespValue>, Error> {
-        match command {
-            Command::Ping => Ok(vec![RespValue::SimpleString("PONG".to_string())]),
+        stream: &mut TcpStream,
+    ) -> Result<(), Error> {
+        let response_value = self.execute_only(command, request_count).await?;
 
-            Command::Echo(arg) => Ok(vec![RespValue::BulkString(arg.clone())]),
+        stream
+            .write_all(&response_value.serialize())
+            .await
+            .context("write-simple-value-back-to-stream")?;
+
+        Ok(())
+    }
+
+    async fn execute_only(
+        &self,
+        command: &Command,
+        request_count: u64,
+    ) -> Result<RespValue, Error> {
+        let value = match command {
+            Command::Ping => RespValue::SimpleString("PONG".to_string()),
+
+            Command::Echo(arg) => RespValue::BulkString(arg.clone()),
 
             Command::Set(key, value, expiry) => {
                 match self
@@ -191,59 +219,59 @@ impl Engine {
                     .await
                     .set(key.clone(), value.clone(), expiry.clone())
                 {
-                    Ok(_) => Ok(vec![RespValue::SimpleString("OK".into())]),
-                    Err(err) => Ok(vec![RespValue::SimpleError(err)]),
+                    Ok(_) => RespValue::SimpleString("OK".into()),
+                    Err(err) => RespValue::SimpleError(err),
                 }
             }
 
             Command::Get(key) => match self.db.read().await.get(key) {
-                Ok(Some(v)) => Ok(vec![RespValue::BulkString(v.clone())]),
-                Ok(None) => Ok(vec![RespValue::NullBulkString]),
-                Err(err) => Ok(vec![RespValue::SimpleError(err)]),
+                Ok(Some(v)) => RespValue::BulkString(v.clone()),
+                Ok(None) => RespValue::NullBulkString,
+                Err(err) => RespValue::SimpleError(err),
             },
 
             Command::Lrange(key, start, end) => {
                 match self.db.read().await.get_list_lrange(key, *start, *end) {
-                    Ok(array) => Ok(vec![RespValue::Array(
+                    Ok(array) => RespValue::Array(
                         array
                             .into_iter()
                             .map(|elem| RespValue::BulkString(elem))
                             .collect::<Vec<_>>(),
-                    )]),
-                    Err(err) => Ok(vec![RespValue::SimpleError(err)]),
+                    ),
+                    Err(err) => RespValue::SimpleError(err),
                 }
             }
 
             Command::Llen(key) => match self.db.read().await.list_length(key) {
-                Ok(n) => Ok(vec![RespValue::Integer(n as i64)]),
-                Err(err) => Ok(vec![RespValue::SimpleError(err)]),
+                Ok(n) => RespValue::Integer(n as i64),
+                Err(err) => RespValue::SimpleError(err),
             },
 
-            Command::Rpush(key, values) => self.push(key, values, ArrayDirection::Back).await,
+            Command::Rpush(key, values) => self.push(key, values, ArrayDirection::Back).await?,
 
-            Command::Lpush(key, values) => self.push(key, values, ArrayDirection::Front).await,
+            Command::Lpush(key, values) => self.push(key, values, ArrayDirection::Front).await?,
 
-            Command::Lpop(key) => self.pop(key, ArrayDirection::Front).await,
+            Command::Lpop(key) => self.pop(key, ArrayDirection::Front).await?,
 
-            Command::Rpop(key) => self.pop(key, ArrayDirection::Back).await,
+            Command::Rpop(key) => self.pop(key, ArrayDirection::Back).await?,
 
-            Command::Lpopn(key, n) => self.pop_multi(key, n, ArrayDirection::Front).await,
+            Command::Lpopn(key, n) => self.pop_multi(key, n, ArrayDirection::Front).await?,
 
-            Command::Rpopn(key, n) => self.pop_multi(key, n, ArrayDirection::Back).await,
+            Command::Rpopn(key, n) => self.pop_multi(key, n, ArrayDirection::Back).await?,
 
             Command::Blpop(keys, timeout_secs) => {
                 self.blocking_pop(keys, timeout_secs, ArrayDirection::Front)
-                    .await
+                    .await?
             }
 
             Command::Brpop(keys, timeout_secs) => {
                 self.blocking_pop(keys, timeout_secs, ArrayDirection::Back)
-                    .await
+                    .await?
             }
 
-            Command::Type(key) => Ok(vec![RespValue::SimpleString(
-                self.db.read().await.get_key_type_name(key).to_string(),
-            )]),
+            Command::Type(key) => {
+                RespValue::SimpleString(self.db.read().await.get_key_type_name(key).to_string())
+            }
 
             Command::Xadd(key, id, entries) => {
                 match self
@@ -254,39 +282,39 @@ impl Engine {
                 {
                     Ok(final_id) => {
                         self.notification.notify_one();
-                        Ok(vec![RespValue::BulkString(final_id.to_string())])
+                        RespValue::BulkString(final_id.to_string())
                     }
-                    Err(err) => Ok(vec![RespValue::SimpleError(err)]),
+                    Err(err) => RespValue::SimpleError(err),
                 }
             }
 
             Command::Xrange(key, start, end, count) => {
                 if *count == 0 {
-                    return Ok(vec![RespValue::NullBulkString]);
-                }
+                    RespValue::NullBulkString
+                } else {
+                    let start = match start {
+                        RangeStreamEntryID::Fixed(v) => v,
+                        RangeStreamEntryID::Latest => {
+                            &self.db.read().await.resolve_latest_stream_id(key)?
+                        }
+                    };
 
-                let start = match start {
-                    RangeStreamEntryID::Fixed(v) => v,
-                    RangeStreamEntryID::Latest => {
-                        &self.db.read().await.resolve_latest_stream_id(key)?
+                    let end = match end {
+                        RangeStreamEntryID::Fixed(v) => v,
+                        RangeStreamEntryID::Latest => {
+                            &self.db.read().await.resolve_latest_stream_id(key)?
+                        }
+                    };
+
+                    match self
+                        .db
+                        .read()
+                        .await
+                        .stream_get_range(key, start, end, *count)
+                    {
+                        Ok(stream_entry) => Self::stream_to_resp(stream_entry),
+                        Err(err) => RespValue::SimpleError(err),
                     }
-                };
-
-                let end = match end {
-                    RangeStreamEntryID::Fixed(v) => v,
-                    RangeStreamEntryID::Latest => {
-                        &self.db.read().await.resolve_latest_stream_id(key)?
-                    }
-                };
-
-                match self
-                    .db
-                    .read()
-                    .await
-                    .stream_get_range(key, start, end, *count)
-                {
-                    Ok(stream_entry) => Ok(vec![Self::stream_to_resp(stream_entry)]),
-                    Err(err) => Ok(vec![RespValue::SimpleError(err)]),
                 }
             }
 
@@ -314,7 +342,7 @@ impl Engine {
                     {
                         Ok(result) => {
                             if !result.is_empty() || blocking_ttl.is_none() {
-                                return Ok(vec![RespValue::Array(
+                                break RespValue::Array(
                                     result
                                         .into_iter()
                                         .map(|(key, stream_entry)| {
@@ -324,15 +352,15 @@ impl Engine {
                                             ])
                                         })
                                         .collect::<Vec<_>>(),
-                                )]);
+                                );
                             }
                         }
-                        Err(err) => return Ok(vec![RespValue::SimpleError(err)]),
+                        Err(err) => break RespValue::SimpleError(err),
                     }
 
                     let now_ms = current_time_ms();
                     if end_ms <= now_ms {
-                        return Ok(vec![RespValue::NullArray]);
+                        break RespValue::NullArray;
                     }
                     let ttl = end_ms - now_ms;
 
@@ -350,8 +378,8 @@ impl Engine {
             }
 
             Command::Incr(key) => match self.db.write().await.incr(key) {
-                Ok(n) => Ok(vec![RespValue::Integer(n)]),
-                Err(err) => Ok(vec![RespValue::SimpleError(err)]),
+                Ok(n) => RespValue::Integer(n),
+                Err(err) => RespValue::SimpleError(err),
             },
 
             Command::Multi => {
@@ -359,7 +387,7 @@ impl Engine {
                     .lock()
                     .await
                     .insert(request_count, vec![]);
-                Ok(vec![RespValue::SimpleString("OK".to_string())])
+                RespValue::SimpleString("OK".to_string())
             }
 
             Command::Exec => {
@@ -367,23 +395,17 @@ impl Engine {
 
                 match transaction_store.remove(&request_count) {
                     Some(commands) => {
-                        let mut results = vec![];
-
+                        let mut subvalues = vec![];
                         for command in commands {
-                            let mut result =
-                                Box::pin(self.execute_now(&command, request_count)).await?;
-                            if result.len() != 1 {
-                                return Err("Unacceptable mutli command response length".into());
-                            }
+                            let subvalue =
+                                Box::pin(self.execute_only(&command, request_count)).await?;
 
-                            results.push(result.remove(0));
+                            subvalues.push(subvalue);
                         }
 
-                        Ok(vec![RespValue::Array(results)])
+                        RespValue::Array(subvalues)
                     }
-                    None => Ok(vec![RespValue::SimpleError(
-                        "ERR EXEC without MULTI".to_string(),
-                    )]),
+                    None => RespValue::SimpleError("ERR EXEC without MULTI".to_string()),
                 }
             }
 
@@ -393,11 +415,9 @@ impl Engine {
                         let mut transaction_store = self.transaction_store.lock().await;
                         transaction_store.remove(&request_count);
                     }
-                    Ok(vec![RespValue::SimpleString("OK".to_string())])
+                    RespValue::SimpleString("OK".to_string())
                 } else {
-                    Ok(vec![RespValue::SimpleError(
-                        "ERR DISCARD without MULTI".to_string(),
-                    )])
+                    RespValue::SimpleError("ERR DISCARD without MULTI".to_string())
                 }
             }
 
@@ -413,7 +433,7 @@ impl Engine {
                     }
                 }
 
-                Ok(vec![RespValue::BulkString(section_strs)])
+                RespValue::BulkString(section_strs)
             }
 
             Command::Replconf(args) => {
@@ -434,7 +454,7 @@ impl Engine {
                             .or_insert(ClientInfo::new());
                         client_info.port = Some(listening_port);
 
-                        Ok(vec![RespValue::SimpleString("OK".into())])
+                        RespValue::SimpleString("OK".into())
                     } else if args.len() == 2 && args[0].to_lowercase() == "capa" {
                         let capa = ClientCapability::from_str(&args[1])
                             .ok_or("ERR invalid client capability".to_string())?;
@@ -451,59 +471,25 @@ impl Engine {
                             .or_insert(ClientInfo::new());
                         client_info.capabilities.insert(capa);
 
-                        Ok(vec![RespValue::SimpleString("OK".into())])
+                        RespValue::SimpleString("OK".into())
                     } else {
-                        Ok(vec![RespValue::SimpleError(
+                        RespValue::SimpleError(
                             "ERR unrecognized argument for 'replconf' command".into(),
-                        )])
+                        )
                     }
                 } else {
-                    Ok(vec![RespValue::SimpleError(
-                        "ERR writer commands on a non-writer node".into(),
-                    )])
+                    RespValue::SimpleError("ERR writer commands on a non-writer node".into())
                 }
             }
 
-            Command::Psync2(_replication_id, offset) => {
-                if self.replication_role.read().await.is_writer() {
-                    let ReplicationRole::Writer(ref mut writer) =
-                        *self.replication_role.write().await
-                    else {
-                        unreachable!()
-                    };
+            Command::Psync(_replication_id, _offset) => unreachable!(),
 
-                    let client_info = writer
-                        .clients
-                        .entry(request_count)
-                        .or_insert(ClientInfo::new());
-
-                    client_info.current_offset = *offset;
-
-                    let fake_rdb_file_bytes_str = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
-                    let fake_rdb_file_bytes = (0..fake_rdb_file_bytes_str.len() / 2)
-                        .into_iter()
-                        .map(|i| {
-                            u8::from_str_radix(&fake_rdb_file_bytes_str[(i * 2)..=(i * 2) + 1], 16)
-                                .unwrap()
-                        })
-                        .collect::<Vec<_>>();
-
-                    Ok(vec![
-                        RespValue::SimpleString(format!("FULLRESYNC {} 0", writer.replid)),
-                        RespValue::BulkBytes(fake_rdb_file_bytes),
-                    ])
-                } else {
-                    Ok(vec![RespValue::SimpleError(
-                        "ERR writer commands on a non-writer node".into(),
-                    )])
-                }
+            Command::Unknown(msg) => {
+                RespValue::SimpleError(format!("Unrecognized command: {}", msg))
             }
+        };
 
-            Command::Unknown(msg) => Ok(vec![RespValue::SimpleError(format!(
-                "Unrecognized command: {}",
-                msg
-            ))]),
-        }
+        Ok(value)
     }
 
     fn stream_to_resp(stream_entry: StreamEntry) -> RespValue {
@@ -536,7 +522,7 @@ impl Engine {
         key: &String,
         values: &Vec<String>,
         dir: ArrayDirection,
-    ) -> Result<Vec<RespValue>, Error> {
+    ) -> Result<RespValue, Error> {
         let result = match dir {
             ArrayDirection::Back => self
                 .db
@@ -552,21 +538,21 @@ impl Engine {
         match result {
             Ok(count) => {
                 self.notification.notify_one();
-                Ok(vec![RespValue::Integer(count as i64)])
+                Ok(RespValue::Integer(count as i64))
             }
-            Err(err) => Ok(vec![RespValue::SimpleError(err)]),
+            Err(err) => Ok(RespValue::SimpleError(err)),
         }
     }
 
-    async fn pop(&self, key: &String, dir: ArrayDirection) -> Result<Vec<RespValue>, Error> {
+    async fn pop(&self, key: &String, dir: ArrayDirection) -> Result<RespValue, Error> {
         let result = match dir {
             ArrayDirection::Back => self.db.write().await.list_pop_one_back(key),
             ArrayDirection::Front => self.db.write().await.list_pop_one_front(key),
         };
         match result {
-            Ok(Some(v)) => return Ok(vec![RespValue::BulkString(v)]),
-            Ok(None) => return Ok(vec![RespValue::NullBulkString]),
-            Err(err) => Ok(vec![RespValue::SimpleError(err)]),
+            Ok(Some(v)) => return Ok(RespValue::BulkString(v)),
+            Ok(None) => return Ok(RespValue::NullBulkString),
+            Err(err) => Ok(RespValue::SimpleError(err)),
         }
     }
 
@@ -575,20 +561,20 @@ impl Engine {
         key: &String,
         n: &usize,
         dir: ArrayDirection,
-    ) -> Result<Vec<RespValue>, Error> {
+    ) -> Result<RespValue, Error> {
         let result = match dir {
             ArrayDirection::Back => self.db.write().await.list_pop_multi_back(key, *n),
             ArrayDirection::Front => self.db.write().await.list_pop_multi_front(key, *n),
         };
         match result {
-            Ok(Some(elems)) => Ok(vec![RespValue::Array(
+            Ok(Some(elems)) => Ok(RespValue::Array(
                 elems
                     .into_iter()
                     .map(|e| RespValue::BulkString(e))
                     .collect(),
-            )]),
-            Ok(None) => return Ok(vec![RespValue::NullBulkString]),
-            Err(err) => Ok(vec![RespValue::SimpleError(err)]),
+            )),
+            Ok(None) => return Ok(RespValue::NullBulkString),
+            Err(err) => Ok(RespValue::SimpleError(err)),
         }
     }
 
@@ -597,7 +583,7 @@ impl Engine {
         keys: &Vec<String>,
         timeout_secs: &f64,
         dir: ArrayDirection,
-    ) -> Result<Vec<RespValue>, Error> {
+    ) -> Result<RespValue, Error> {
         let now_secs = current_time_secs_f64();
         let end_secs = now_secs + timeout_secs;
 
@@ -608,16 +594,16 @@ impl Engine {
                     ArrayDirection::Front => self.db.write().await.list_pop_one_front(key)?,
                 };
                 if let Some(v) = result {
-                    return Ok(vec![RespValue::Array(vec![
+                    return Ok(RespValue::Array(vec![
                         RespValue::BulkString(key.clone()),
                         RespValue::BulkString(v),
-                    ])]);
+                    ]));
                 }
             }
 
             let ttl = end_secs - current_time_secs_f64();
             if ttl <= 0.0 {
-                return Ok(vec![RespValue::NullArray]);
+                return Ok(RespValue::NullArray);
             }
 
             tokio::spawn({
@@ -666,6 +652,61 @@ impl Engine {
         if response != Some(expected_response) {
             return Err("Unexpected response to handshake".into());
         };
+
+        Ok(())
+    }
+
+    async fn psync(
+        &self,
+        stream: &mut TcpStream,
+        request_count: u64,
+        command: &Command,
+    ) -> Result<(), Error> {
+        let Command::Psync(_replication_id, offset) = command else {
+            unreachable!()
+        };
+
+        if !self.replication_role.read().await.is_writer() {
+            stream
+                .write_all(
+                    &RespValue::SimpleError("ERR writer commands on a non-writer node".into())
+                        .serialize(),
+                )
+                .await
+                .context("write-simple-value-back-to-stream")?;
+            return Ok(());
+        }
+
+        let ReplicationRole::Writer(ref mut writer) = *self.replication_role.write().await else {
+            unreachable!()
+        };
+
+        let client_info = writer
+            .clients
+            .entry(request_count)
+            .or_insert(ClientInfo::new());
+
+        client_info.current_offset = *offset;
+
+        let fake_rdb_file_bytes_str = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
+        let fake_rdb_file_bytes = (0..fake_rdb_file_bytes_str.len() / 2)
+            .into_iter()
+            .map(|i| {
+                u8::from_str_radix(&fake_rdb_file_bytes_str[(i * 2)..=(i * 2) + 1], 16).unwrap()
+            })
+            .collect::<Vec<_>>();
+
+        stream
+            .write_all(
+                &RespValue::SimpleString(format!("FULLRESYNC {} 0", writer.replid)).serialize(),
+            )
+            .await
+            .context("write-simple-value-back-to-stream")?;
+
+        stream
+            .write_all(&RespValue::BulkBytes(fake_rdb_file_bytes).serialize())
+            .await
+            .context("write-simple-value-back-to-stream")?;
 
         Ok(())
     }
