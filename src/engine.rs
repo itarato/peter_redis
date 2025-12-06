@@ -1,4 +1,8 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::Arc,
+    time::Duration,
+};
 
 use anyhow::Context;
 use tokio::{
@@ -8,6 +12,7 @@ use tokio::{
 };
 
 use crate::{
+    command_parser::CommandParser,
     commands::Command,
     common::{
         current_time_ms, current_time_secs_f64, new_master_replid, read_bulk_bytes_from_tcp_stream,
@@ -30,6 +35,7 @@ pub(crate) struct Engine {
     notification: Arc<Notify>,
     transaction_store: Mutex<HashMap<u64, Vec<Command>>>,
     replication_role: RwLock<ReplicationRole>,
+    write_queue_notification: Notify,
 }
 
 impl Engine {
@@ -43,6 +49,7 @@ impl Engine {
                 replid: new_master_replid(),
                 offset: 0,
                 clients: HashMap::new(),
+                write_queue: VecDeque::new(),
             }),
         };
 
@@ -51,6 +58,7 @@ impl Engine {
             notification: Arc::new(Notify::new()),
             transaction_store: Mutex::new(HashMap::new()),
             replication_role: RwLock::new(replication_role),
+            write_queue_notification: Notify::new(),
         }
     }
 
@@ -146,6 +154,22 @@ impl Engine {
         let response = read_bulk_bytes_from_tcp_stream(&mut stream).await?;
         debug!("Handshake final response: {} bytes", response.len());
 
+        // TODO: replace DB to `response`
+
+        loop {
+            match read_resp_value_from_tcp_stream(&mut stream).await? {
+                Some(value) => {
+                    let command = CommandParser::parse(value)?;
+                    debug!("Reader replicates command: {:?}", &command);
+                    self.execute_only(&command, None).await?;
+                }
+                None => {
+                    debug!("Reader listening has ended due to stream closing");
+                    break;
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -192,7 +216,7 @@ impl Engine {
         request_count: u64,
         stream: &mut TcpStream,
     ) -> Result<(), Error> {
-        let response_value = self.execute_only(command, request_count).await?;
+        let response_value = self.execute_only(command, Some(request_count)).await?;
 
         stream
             .write_all(&response_value.serialize())
@@ -205,7 +229,7 @@ impl Engine {
     async fn execute_only(
         &self,
         command: &Command,
-        request_count: u64,
+        request_count: Option<u64>,
     ) -> Result<RespValue, Error> {
         let value = match command {
             Command::Ping => RespValue::SimpleString("PONG".to_string()),
@@ -386,14 +410,14 @@ impl Engine {
                 self.transaction_store
                     .lock()
                     .await
-                    .insert(request_count, vec![]);
+                    .insert(request_count.unwrap(), vec![]);
                 RespValue::SimpleString("OK".to_string())
             }
 
             Command::Exec => {
                 let mut transaction_store = self.transaction_store.lock().await;
 
-                match transaction_store.remove(&request_count) {
+                match transaction_store.remove(&request_count.unwrap()) {
                     Some(commands) => {
                         let mut subvalues = vec![];
                         for command in commands {
@@ -410,10 +434,10 @@ impl Engine {
             }
 
             Command::Discard => {
-                if self.is_transaction(request_count).await {
+                if self.is_transaction(request_count.unwrap()).await {
                     {
                         let mut transaction_store = self.transaction_store.lock().await;
-                        transaction_store.remove(&request_count);
+                        transaction_store.remove(&request_count.unwrap());
                     }
                     RespValue::SimpleString("OK".to_string())
                 } else {
@@ -450,7 +474,7 @@ impl Engine {
 
                         let client_info = writer
                             .clients
-                            .entry(request_count)
+                            .entry(request_count.unwrap())
                             .or_insert(ClientInfo::new());
                         client_info.port = Some(listening_port);
 
@@ -467,7 +491,7 @@ impl Engine {
 
                         let client_info = writer
                             .clients
-                            .entry(request_count)
+                            .entry(request_count.unwrap())
                             .or_insert(ClientInfo::new());
                         client_info.capabilities.insert(capa);
 
@@ -488,6 +512,17 @@ impl Engine {
                 RespValue::SimpleError(format!("Unrecognized command: {}", msg))
             }
         };
+
+        if self.replication_role.read().await.is_writer() {
+            if command.is_write() {
+                self.replication_role
+                    .write()
+                    .await
+                    .writer_mut()
+                    .push_write_command(command.clone());
+            }
+            self.write_queue_notification.notify_waiters();
+        }
 
         Ok(value)
     }
@@ -677,16 +712,22 @@ impl Engine {
             return Ok(());
         }
 
-        let ReplicationRole::Writer(ref mut writer) = *self.replication_role.write().await else {
-            unreachable!()
-        };
+        let writer_replid;
 
-        let client_info = writer
-            .clients
-            .entry(request_count)
-            .or_insert(ClientInfo::new());
+        {
+            let ReplicationRole::Writer(ref mut writer) = *self.replication_role.write().await
+            else {
+                unreachable!()
+            };
+            writer_replid = writer.replid.clone();
 
-        client_info.current_offset = *offset;
+            let client_info = writer
+                .clients
+                .entry(request_count)
+                .or_insert(ClientInfo::new());
+
+            client_info.current_offset = *offset;
+        }
 
         let fake_rdb_file_bytes_str = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
         let fake_rdb_file_bytes = (0..fake_rdb_file_bytes_str.len() / 2)
@@ -698,7 +739,7 @@ impl Engine {
 
         stream
             .write_all(
-                &RespValue::SimpleString(format!("FULLRESYNC {} 0", writer.replid)).serialize(),
+                &RespValue::SimpleString(format!("FULLRESYNC {} 0", writer_replid)).serialize(),
             )
             .await
             .context("write-simple-value-back-to-stream")?;
@@ -708,6 +749,22 @@ impl Engine {
             .await
             .context("write-simple-value-back-to-stream")?;
 
-        Ok(())
+        loop {
+            let write_commands;
+            {
+                let mut writer_guard = self.replication_role.write().await;
+                let writer = writer_guard.writer_mut();
+                write_commands = writer.pop_write_command(request_count);
+            }
+
+            if write_commands.is_empty() {
+                debug!("Wait for write events to send to readers");
+                self.write_queue_notification.notified().await;
+            }
+
+            for command in write_commands {
+                stream.write_all(&command.into_resp().serialize()).await?;
+            }
+        }
     }
 }

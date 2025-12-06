@@ -1,4 +1,7 @@
-use crate::common::{KeyValuePair, RangeStreamEntryID, StreamEntryID};
+use crate::{
+    common::{KeyValuePair, RangeStreamEntryID, StreamEntryID},
+    resp::RespValue,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) enum Command {
@@ -57,6 +60,126 @@ impl Command {
         match self {
             Command::Psync(_, _) => true,
             _ => false,
+        }
+    }
+
+    pub(crate) fn is_write(&self) -> bool {
+        match self {
+            Command::Ping => false,
+            Command::Echo(_) => false,
+            Command::Set(_, _, _) => true,
+            Command::Get(_) => false,
+            Command::Rpush(_, _) => true,
+            Command::Lpush(_, _) => true,
+            Command::Lrange(_, _, _) => false,
+            Command::Llen(_) => false,
+            Command::Lpop(_) => true,
+            Command::Rpop(_) => true,
+            Command::Lpopn(_, _) => true,
+            Command::Rpopn(_, _) => true,
+            Command::Blpop(_, _) => true,
+            Command::Brpop(_, _) => true,
+            Command::Type(_) => false,
+            Command::Xadd(_, _, _) => true,
+            Command::Xrange(_, _, _, _) => false,
+            Command::Xread(_, _, _) => false,
+            Command::Incr(_) => true,
+            Command::Multi => false,
+            Command::Exec => false,
+            Command::Discard => false,
+            Command::Info(_) => false,
+            Command::Replconf(_) => false,
+            Command::Psync(_, _) => false,
+            Command::Unknown(_) => false,
+        }
+    }
+
+    pub(crate) fn into_resp(&self) -> RespValue {
+        match self {
+            Command::Set(key, value, expiry) => {
+                let mut params = vec![
+                    RespValue::BulkString("SET".into()),
+                    RespValue::BulkString(key.clone()),
+                    RespValue::BulkString(value.clone()),
+                ];
+
+                if let Some(expiry_ms) = expiry {
+                    params.push(RespValue::BulkString("PX".into()));
+                    params.push(RespValue::BulkString(format!("{}", expiry_ms)));
+                }
+
+                RespValue::Array(params)
+            }
+
+            Command::Rpush(key, args) => {
+                let mut params = vec![
+                    RespValue::BulkString("RPUSH".into()),
+                    RespValue::BulkString(key.clone()),
+                ];
+
+                for arg in args {
+                    params.push(RespValue::BulkString(arg.clone()));
+                }
+
+                RespValue::Array(params)
+            }
+
+            Command::Lpush(key, args) => {
+                let mut params = vec![
+                    RespValue::BulkString("LPUSH".into()),
+                    RespValue::BulkString(key.clone()),
+                ];
+
+                for arg in args {
+                    params.push(RespValue::BulkString(arg.clone()));
+                }
+
+                RespValue::Array(params)
+            }
+
+            Command::Lpop(key) => RespValue::Array(vec![
+                RespValue::BulkString("LPOP".into()),
+                RespValue::BulkString(key.clone()),
+            ]),
+
+            Command::Rpop(key) => RespValue::Array(vec![
+                RespValue::BulkString("RPOP".into()),
+                RespValue::BulkString(key.clone()),
+            ]),
+
+            Command::Lpopn(key, count) => RespValue::Array(vec![
+                RespValue::BulkString("LPOP".into()),
+                RespValue::BulkString(key.clone()),
+                RespValue::BulkString(count.to_string()),
+            ]),
+
+            Command::Rpopn(key, count) => RespValue::Array(vec![
+                RespValue::BulkString("RPOP".into()),
+                RespValue::BulkString(key.clone()),
+                RespValue::BulkString(count.to_string()),
+            ]),
+
+            Command::Xadd(key, stream_id, key_value_pairs) => {
+                let mut args = vec![
+                    RespValue::BulkString("XADD".into()),
+                    RespValue::BulkString(key.clone()),
+                    RespValue::BulkString(stream_id.to_resp_string()),
+                ];
+
+                for (k, v) in key_value_pairs {
+                    args.push(RespValue::BulkString(k.clone()));
+                    args.push(RespValue::BulkString(v.clone()));
+                }
+
+                RespValue::Array(args)
+            }
+
+            Command::Incr(key) => RespValue::Array(vec![
+                RespValue::BulkString("INCR".into()),
+                RespValue::BulkString(key.clone()),
+            ]),
+
+            _ => todo!("Command resp-ization not implemented yet for {:?}", self),
         }
     }
 }

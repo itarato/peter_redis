@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::u128;
 
 use anyhow::Context;
@@ -10,6 +11,7 @@ use tokio::io::AsyncReadExt;
 use tokio::io::BufReader;
 use tokio::net::TcpStream;
 
+use crate::commands::Command;
 use crate::resp::RespValue;
 
 pub(crate) type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -54,6 +56,39 @@ pub(crate) struct WriterRole {
     pub(crate) offset: u64,
     //                          vvv--request-count
     pub(crate) clients: HashMap<u64, ClientInfo>,
+    pub(crate) write_queue: VecDeque<Command>,
+}
+
+impl WriterRole {
+    pub(crate) fn push_write_command(&mut self, command: Command) {
+        self.write_queue.push_back(command);
+    }
+
+    pub(crate) fn pop_write_command(&mut self, request_count: u64) -> Vec<Command> {
+        let client_info = self
+            .clients
+            .get_mut(&request_count)
+            .expect("loading client info");
+
+        let last_read_index = client_info.current_offset;
+        let latest_readable_index = self.write_queue.len() as i64 - 1;
+
+        if latest_readable_index == last_read_index {
+            return vec![];
+        }
+        if latest_readable_index < last_read_index {
+            panic!("Latest index is greater than last index");
+        }
+
+        let mut out = vec![];
+        for i in (last_read_index + 1)..=latest_readable_index {
+            out.push(self.write_queue[i as usize].clone());
+        }
+
+        client_info.current_offset = latest_readable_index;
+
+        out
+    }
 }
 
 pub(crate) enum ReplicationRole {
@@ -73,6 +108,13 @@ impl ReplicationRole {
         match self {
             ReplicationRole::Reader(_) => true,
             _ => false,
+        }
+    }
+
+    pub(crate) fn writer_mut(&mut self) -> &mut WriterRole {
+        match self {
+            ReplicationRole::Writer(writer) => writer,
+            _ => panic!("Caller must ensure role is writer"),
         }
     }
 }
@@ -112,6 +154,16 @@ pub(crate) enum StreamEntryID {
     Wildcard,
     MsOnly(u128),
     Full(CompleteStreamEntryID),
+}
+
+impl StreamEntryID {
+    pub(crate) fn to_resp_string(&self) -> String {
+        match self {
+            StreamEntryID::Wildcard => "*".to_string(),
+            StreamEntryID::MsOnly(ms) => ms.to_string(),
+            StreamEntryID::Full(id) => format!("{}-{}", id.0, id.1),
+        }
+    }
 }
 
 pub(crate) fn current_time_ms() -> u128 {
