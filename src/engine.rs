@@ -63,10 +63,16 @@ impl Engine {
     }
 
     pub(crate) async fn init(&self, server_port: u16) -> Result<(), Error> {
-        if !self.replication_role.read().await.is_reader() {
-            return Ok(());
+        if self.replication_role.read().await.is_writer() {
+            Ok(())
+        } else if self.replication_role.read().await.is_reader() {
+            self.read_replication_handle(server_port).await
+        } else {
+            unreachable!()
         }
+    }
 
+    async fn read_replication_handle(&self, server_port: u16) -> Result<(), Error> {
         let (writer_host, writer_port) = {
             let ReplicationRole::Reader(ref reader) = *self.replication_role.read().await else {
                 unreachable!();
@@ -75,15 +81,6 @@ impl Engine {
             (reader.writer_host.clone(), reader.writer_port)
         };
 
-        self.handshake(server_port, writer_host, writer_port).await
-    }
-
-    pub(crate) async fn handshake(
-        &self,
-        server_port: u16,
-        writer_host: String,
-        writer_port: u16,
-    ) -> Result<(), Error> {
         let socket_addr = {
             if let Ok(addr) =
                 format!("{}:{}", writer_host, writer_port).parse::<std::net::SocketAddr>()
@@ -107,15 +104,39 @@ impl Engine {
             .await
             .context("connecting-to-writer")?;
 
+        self.handshake(server_port, &mut stream).await?;
+
+        self.listen_for_replication_updates(&mut stream).await?;
+
+        Ok(())
+    }
+
+    async fn listen_for_replication_updates(&self, stream: &mut TcpStream) -> Result<(), Error> {
+        loop {
+            match read_resp_value_from_tcp_stream(stream).await? {
+                Some(value) => {
+                    let command = CommandParser::parse(value)?;
+                    debug!("Reader replicates command: {:?}", &command);
+                    self.execute_only(&command, None).await?;
+                }
+                None => {
+                    debug!("Reader listening has ended due to stream closing");
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    async fn handshake(&self, server_port: u16, stream: &mut TcpStream) -> Result<(), Error> {
         Self::handshake_step(
-            &mut stream,
+            stream,
             RespValue::Array(vec![RespValue::BulkString("PING".into())]),
             RespValue::SimpleString("PONG".to_string()),
         )
         .await?;
 
         Self::handshake_step(
-            &mut stream,
+            stream,
             RespValue::Array(vec![
                 RespValue::BulkString("REPLCONF".into()),
                 RespValue::BulkString("listening-port".into()),
@@ -126,7 +147,7 @@ impl Engine {
         .await?;
 
         Self::handshake_step(
-            &mut stream,
+            stream,
             RespValue::Array(vec![
                 RespValue::BulkString("REPLCONF".into()),
                 RespValue::BulkString("capa".into()),
@@ -148,27 +169,13 @@ impl Engine {
             .await
             .context("responding-to-writer")?;
 
-        let response = read_resp_value_from_tcp_stream(&mut stream).await?;
+        let response = read_resp_value_from_tcp_stream(stream).await?;
         debug!("Handshake response: {:?}", response);
 
-        let response = read_bulk_bytes_from_tcp_stream(&mut stream).await?;
+        let response = read_bulk_bytes_from_tcp_stream(stream).await?;
         debug!("Handshake final response: {} bytes", response.len());
 
         // TODO: replace DB to `response`
-
-        loop {
-            match read_resp_value_from_tcp_stream(&mut stream).await? {
-                Some(value) => {
-                    let command = CommandParser::parse(value)?;
-                    debug!("Reader replicates command: {:?}", &command);
-                    self.execute_only(&command, None).await?;
-                }
-                None => {
-                    debug!("Reader listening has ended due to stream closing");
-                    break;
-                }
-            }
-        }
 
         Ok(())
     }

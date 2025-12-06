@@ -65,25 +65,26 @@ impl Command {
 
     pub(crate) fn is_write(&self) -> bool {
         match self {
-            Command::Ping => false,
-            Command::Echo(_) => false,
             Command::Set(_, _, _) => true,
-            Command::Get(_) => false,
             Command::Rpush(_, _) => true,
             Command::Lpush(_, _) => true,
-            Command::Lrange(_, _, _) => false,
-            Command::Llen(_) => false,
             Command::Lpop(_) => true,
             Command::Rpop(_) => true,
             Command::Lpopn(_, _) => true,
             Command::Rpopn(_, _) => true,
             Command::Blpop(_, _) => true,
             Command::Brpop(_, _) => true,
-            Command::Type(_) => false,
             Command::Xadd(_, _, _) => true,
+            Command::Incr(_) => true,
+            // ---
+            Command::Ping => false,
+            Command::Echo(_) => false,
+            Command::Get(_) => false,
+            Command::Lrange(_, _, _) => false,
+            Command::Llen(_) => false,
+            Command::Type(_) => false,
             Command::Xrange(_, _, _, _) => false,
             Command::Xread(_, _, _) => false,
-            Command::Incr(_) => true,
             Command::Multi => false,
             Command::Exec => false,
             Command::Discard => false,
@@ -179,7 +180,7 @@ impl Command {
                 RespValue::BulkString(key.clone()),
             ]),
 
-            _ => todo!("Command resp-ization not implemented yet for {:?}", self),
+            _ => unimplemented!("Command resp-ization not implemented for {:?}", self),
         }
     }
 }
