@@ -188,12 +188,11 @@ pub(crate) fn new_master_replid() -> String {
     bytes.map(|b| format!("{:x}", b)).join("")
 }
 
-pub(crate) async fn read_resp_value_from_tcp_stream(
-    stream: &mut TcpStream,
+pub(crate) async fn read_resp_value_from_buf_reader(
+    buf_reader: &mut BufReader<&mut TcpStream>,
     request_count: Option<u64>,
 ) -> Result<Option<RespValue>, Error> {
-    let mut buf_reader = BufReader::new(stream);
-    read_resp_value(&mut buf_reader, request_count).await
+    read_resp_value(buf_reader, request_count).await
 }
 
 async fn read_resp_value(
@@ -264,11 +263,9 @@ async fn read_line_from_tcp_stream(
 }
 
 pub(crate) async fn read_bulk_bytes_from_tcp_stream(
-    stream: &mut TcpStream,
+    buf_reader: &mut BufReader<&mut TcpStream>,
     request_count: Option<u64>,
 ) -> Result<Vec<u8>, Error> {
-    let mut buf_reader = BufReader::new(stream);
-
     let mut size_raw = String::new();
     buf_reader
         .read_line(&mut size_raw)
@@ -278,7 +275,7 @@ pub(crate) async fn read_bulk_bytes_from_tcp_stream(
     let size_raw = size_raw.trim_end();
 
     if !size_raw.starts_with("$") {
-        let next = read_line_from_tcp_stream(&mut buf_reader, request_count).await?;
+        let next = read_line_from_tcp_stream(buf_reader, request_count).await?;
         return Err(format!(
             "Invalid start of size for bulk bytes. Got: {} (Next: {}) (RC: {:?})",
             size_raw, next, request_count

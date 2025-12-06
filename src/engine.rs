@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::Context;
 use tokio::{
-    io::AsyncWriteExt,
+    io::{AsyncWriteExt, BufReader},
     net::{TcpSocket, TcpStream},
     sync::{Mutex, Notify, RwLock},
 };
@@ -16,7 +16,7 @@ use crate::{
     commands::Command,
     common::{
         current_time_ms, current_time_secs_f64, new_master_replid, read_bulk_bytes_from_tcp_stream,
-        read_resp_value_from_tcp_stream, ClientCapability, ClientInfo, Error, RangeStreamEntryID,
+        read_resp_value_from_buf_reader, ClientCapability, ClientInfo, Error, RangeStreamEntryID,
         ReaderRole, ReplicationRole, WriterRole,
     },
     database::{Database, StreamEntry},
@@ -103,18 +103,22 @@ impl Engine {
             .connect(socket_addr)
             .await
             .context("connecting-to-writer")?;
+        let mut buf_reader = BufReader::new(&mut stream);
 
-        self.handshake(server_port, &mut stream).await?;
+        self.handshake(server_port, &mut buf_reader).await?;
 
-        self.listen_for_replication_updates(&mut stream).await?;
+        self.listen_for_replication_updates(&mut buf_reader).await?;
 
         Ok(())
     }
 
-    async fn listen_for_replication_updates(&self, stream: &mut TcpStream) -> Result<(), Error> {
+    async fn listen_for_replication_updates(
+        &self,
+        buf_reader: &mut BufReader<&mut TcpStream>,
+    ) -> Result<(), Error> {
         loop {
             debug!("Start waiting for replication input");
-            match read_resp_value_from_tcp_stream(stream, None).await? {
+            match read_resp_value_from_buf_reader(buf_reader, None).await? {
                 Some(value) => {
                     let command = CommandParser::parse(value)?;
                     debug!("Reader replicates command: {:?}", &command);
@@ -128,16 +132,20 @@ impl Engine {
         }
     }
 
-    async fn handshake(&self, server_port: u16, stream: &mut TcpStream) -> Result<(), Error> {
+    async fn handshake(
+        &self,
+        server_port: u16,
+        buf_reader: &mut BufReader<&mut TcpStream>,
+    ) -> Result<(), Error> {
         Self::handshake_step(
-            stream,
+            buf_reader,
             RespValue::Array(vec![RespValue::BulkString("PING".into())]),
             RespValue::SimpleString("PONG".to_string()),
         )
         .await?;
 
         Self::handshake_step(
-            stream,
+            buf_reader,
             RespValue::Array(vec![
                 RespValue::BulkString("REPLCONF".into()),
                 RespValue::BulkString("listening-port".into()),
@@ -148,7 +156,7 @@ impl Engine {
         .await?;
 
         Self::handshake_step(
-            stream,
+            buf_reader,
             RespValue::Array(vec![
                 RespValue::BulkString("REPLCONF".into()),
                 RespValue::BulkString("capa".into()),
@@ -158,7 +166,7 @@ impl Engine {
         )
         .await?;
 
-        stream
+        buf_reader
             .write_all(
                 &RespValue::Array(vec![
                     RespValue::BulkString("PSYNC".into()),
@@ -170,10 +178,10 @@ impl Engine {
             .await
             .context("responding-to-writer")?;
 
-        let response = read_resp_value_from_tcp_stream(stream, None).await?;
+        let response = read_resp_value_from_buf_reader(buf_reader, None).await?;
         debug!("Handshake response: {:?}", response);
 
-        let response = read_bulk_bytes_from_tcp_stream(stream, None).await?;
+        let response = read_bulk_bytes_from_tcp_stream(buf_reader, None).await?;
         debug!("Handshake final response: {} bytes", response.len());
 
         // TODO: replace DB to `response`
@@ -680,16 +688,16 @@ impl Engine {
     }
 
     async fn handshake_step(
-        stream: &mut TcpStream,
+        buf_reader: &mut BufReader<&mut TcpStream>,
         payload: RespValue,
         expected_response: RespValue,
     ) -> Result<(), Error> {
-        stream
+        buf_reader
             .write_all(&payload.serialize())
             .await
             .context("responding-to-writer")?;
 
-        let response = read_resp_value_from_tcp_stream(stream, None).await?;
+        let response = read_resp_value_from_buf_reader(buf_reader, None).await?;
         debug!("Handshake response: {:?}", response);
 
         if response != Some(expected_response) {

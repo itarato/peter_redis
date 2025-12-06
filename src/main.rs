@@ -43,7 +43,7 @@ impl Args {
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    unsafe { env::set_var("RUST_LOG", "debug") };
+    // unsafe { env::set_var("RUST_LOG", "debug") };
     pretty_env_logger::init();
 
     info!("Peter-Redis starting");
