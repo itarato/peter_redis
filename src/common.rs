@@ -190,15 +190,17 @@ pub(crate) fn new_master_replid() -> String {
 
 pub(crate) async fn read_resp_value_from_tcp_stream(
     stream: &mut TcpStream,
+    request_count: Option<u64>,
 ) -> Result<Option<RespValue>, Error> {
     let mut buf_reader = BufReader::new(stream);
-    read_resp_value(&mut buf_reader).await
+    read_resp_value(&mut buf_reader, request_count).await
 }
 
 async fn read_resp_value(
     buf_reader: &mut BufReader<&mut TcpStream>,
+    request_count: Option<u64>,
 ) -> Result<Option<RespValue>, Error> {
-    let line = read_line_from_tcp_stream(buf_reader).await?;
+    let line = read_line_from_tcp_stream(buf_reader, request_count).await?;
 
     if line.is_empty() {
         return Ok(None);
@@ -208,7 +210,7 @@ async fn read_resp_value(
         let bulk_str_len =
             usize::from_str_radix(&line[1..].trim(), 10).context("parse-bulk-str-len")?;
 
-        let next_line = read_line_from_tcp_stream(buf_reader).await?;
+        let next_line = read_line_from_tcp_stream(buf_reader, request_count).await?;
 
         if next_line.trim().len() != bulk_str_len {
             return Err(format!(
@@ -226,7 +228,7 @@ async fn read_resp_value(
         let mut items = vec![];
 
         for _ in 0..array_len {
-            match Box::pin(read_resp_value(buf_reader)).await? {
+            match Box::pin(read_resp_value(buf_reader, request_count)).await? {
                 Some(item) => items.push(item),
                 None => return Err("Missing array item".into()),
             }
@@ -243,6 +245,7 @@ async fn read_resp_value(
 
 async fn read_line_from_tcp_stream(
     buf_reader: &mut BufReader<&mut TcpStream>,
+    request_count: Option<u64>,
 ) -> Result<String, Error> {
     let mut buf = String::new();
     buf_reader
@@ -250,13 +253,19 @@ async fn read_line_from_tcp_stream(
         .await
         .context("number-read")?;
 
-    debug!("Incoming {} bytes from TcpStream", buf.len());
+    debug!(
+        "Incoming {} bytes from TcpStream [{}] (RC: {:?})",
+        buf.len(),
+        buf.trim_end(),
+        request_count
+    );
 
     Ok(buf)
 }
 
 pub(crate) async fn read_bulk_bytes_from_tcp_stream(
     stream: &mut TcpStream,
+    request_count: Option<u64>,
 ) -> Result<Vec<u8>, Error> {
     let mut buf_reader = BufReader::new(stream);
 
@@ -269,7 +278,12 @@ pub(crate) async fn read_bulk_bytes_from_tcp_stream(
     let size_raw = size_raw.trim_end();
 
     if !size_raw.starts_with("$") {
-        return Err("Invalid start of size for bulk bytes".into());
+        let next = read_line_from_tcp_stream(&mut buf_reader, request_count).await?;
+        return Err(format!(
+            "Invalid start of size for bulk bytes. Got: {} (Next: {}) (RC: {:?})",
+            size_raw, next, request_count
+        )
+        .into());
     }
 
     let size = usize::from_str_radix(&size_raw[1..], 10).context("convert-size-to-usize")?;
@@ -285,7 +299,11 @@ pub(crate) async fn read_bulk_bytes_from_tcp_stream(
         return Err(format!("Read size mismatch. Read {}. Expected {}.", read_size, size).into());
     }
 
-    debug!("Incoming {} bytes from TcpStream", buf.len());
+    debug!(
+        "Incoming {} bytes from TcpStream (RC: {:?})",
+        buf.len(),
+        request_count
+    );
 
     Ok(buf)
 }

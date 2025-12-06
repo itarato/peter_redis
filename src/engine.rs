@@ -113,7 +113,8 @@ impl Engine {
 
     async fn listen_for_replication_updates(&self, stream: &mut TcpStream) -> Result<(), Error> {
         loop {
-            match read_resp_value_from_tcp_stream(stream).await? {
+            debug!("Start waiting for replication input");
+            match read_resp_value_from_tcp_stream(stream, None).await? {
                 Some(value) => {
                     let command = CommandParser::parse(value)?;
                     debug!("Reader replicates command: {:?}", &command);
@@ -169,10 +170,10 @@ impl Engine {
             .await
             .context("responding-to-writer")?;
 
-        let response = read_resp_value_from_tcp_stream(stream).await?;
+        let response = read_resp_value_from_tcp_stream(stream, None).await?;
         debug!("Handshake response: {:?}", response);
 
-        let response = read_bulk_bytes_from_tcp_stream(stream).await?;
+        let response = read_bulk_bytes_from_tcp_stream(stream, None).await?;
         debug!("Handshake final response: {} bytes", response.len());
 
         // TODO: replace DB to `response`
@@ -520,15 +521,15 @@ impl Engine {
             }
         };
 
-        if self.replication_role.read().await.is_writer() {
-            if command.is_write() {
+        if command.is_write() {
+            if self.replication_role.read().await.is_writer() {
                 self.replication_role
                     .write()
                     .await
                     .writer_mut()
                     .push_write_command(command.clone());
+                self.write_queue_notification.notify_waiters();
             }
-            self.write_queue_notification.notify_waiters();
         }
 
         Ok(value)
@@ -688,7 +689,7 @@ impl Engine {
             .await
             .context("responding-to-writer")?;
 
-        let response = read_resp_value_from_tcp_stream(stream).await?;
+        let response = read_resp_value_from_tcp_stream(stream, None).await?;
         debug!("Handshake response: {:?}", response);
 
         if response != Some(expected_response) {

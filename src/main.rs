@@ -10,6 +10,8 @@ mod engine;
 mod resp;
 mod server;
 
+use std::env;
+
 use log::info;
 
 use crate::{common::Error, server::*};
@@ -41,6 +43,7 @@ impl Args {
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
+    unsafe { env::set_var("RUST_LOG", "debug") };
     pretty_env_logger::init();
 
     info!("Peter-Redis starting");

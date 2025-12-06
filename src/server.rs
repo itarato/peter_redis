@@ -66,7 +66,7 @@ impl Server {
         request_count: u64,
     ) -> Result<(), Error> {
         loop {
-            match read_resp_value_from_tcp_stream(&mut stream).await? {
+            match read_resp_value_from_tcp_stream(&mut stream, Some(request_count)).await? {
                 Some(input) => match CommandParser::parse(input) {
                     Ok(command) => {
                         debug!("Received command: {:?}", command);
