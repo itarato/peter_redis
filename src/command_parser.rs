@@ -361,6 +361,14 @@ impl CommandParser {
                         return Ok(Command::Psync(replication_id, offset));
                     }
 
+                    if name.to_lowercase() == "wait" {
+                        let str_items = Self::get_strings_exact(items, 3, "wait")?;
+                        let replica_count = to_number!(usize, &str_items[1], "wait");
+                        let timeout_ms = to_number!(u128, &str_items[2], "wait");
+
+                        return Ok(Command::Wait(replica_count, timeout_ms));
+                    }
+
                     return Ok(Command::Unknown(name.to_lowercase()));
                 } else {
                     return Ok(Command::Unknown("not-a-string".to_string()));

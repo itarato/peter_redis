@@ -556,6 +556,8 @@ impl Engine {
 
             Command::Psync(_replication_id, _offset) => unreachable!(),
 
+            Command::Wait(_replica_count, _timeout_ms) => RespValue::Integer(0),
+
             Command::Unknown(msg) => {
                 RespValue::SimpleError(format!("Unrecognized command: {}", msg))
             }

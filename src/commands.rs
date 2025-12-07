@@ -30,6 +30,10 @@ pub(crate) enum Command {
     Info(Vec<String>),
     Replconf(Vec<String>),
     Psync(String, i64),
+    Wait(
+        usize, /* number of replicas */
+        u128,  /* timeout ms */
+    ),
     // ---
     Unknown(String),
 }
@@ -99,6 +103,7 @@ impl Command {
             Command::Replconf(_) => false,
             Command::Psync(_, _) => false,
             Command::Unknown(_) => false,
+            Command::Wait(_, _) => false,
         }
     }
 
