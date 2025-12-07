@@ -63,6 +63,13 @@ impl Command {
         }
     }
 
+    pub(crate) fn is_replconf(&self) -> bool {
+        match self {
+            Command::Replconf(_) => true,
+            _ => false,
+        }
+    }
+
     pub(crate) fn is_write(&self) -> bool {
         match self {
             Command::Set(_, _, _) => true,

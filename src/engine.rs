@@ -122,7 +122,13 @@ impl Engine {
                 Some(value) => {
                     let command = CommandParser::parse(value)?;
                     debug!("Reader replicates command: {:?}", &command);
-                    self.execute_only(&command, None).await?;
+
+                    if command.is_replconf() {
+                        self.execute_and_reply(&command, None, buf_reader.get_mut())
+                            .await?;
+                    } else {
+                        self.execute_only(&command, None).await?;
+                    }
                 }
                 None => {
                     debug!("Reader listening has ended due to stream closing");
@@ -217,9 +223,10 @@ impl Engine {
                     .context("write-simple-value-back-to-stream")?;
             }
         } else if command.is_psync() {
-            self.psync(stream, request_count, command).await?;
+            self.writer_propagation_handle(stream, request_count, command)
+                .await?;
         } else {
-            self.execute_and_reply(command, request_count, stream)
+            self.execute_and_reply(command, Some(request_count), stream)
                 .await?;
         }
 
@@ -229,10 +236,10 @@ impl Engine {
     async fn execute_and_reply(
         &self,
         command: &Command,
-        request_count: u64,
+        request_count: Option<u64>,
         stream: &mut TcpStream,
     ) -> Result<(), Error> {
-        let response_value = self.execute_only(command, Some(request_count)).await?;
+        let response_value = self.execute_only(command, request_count).await?;
 
         stream
             .write_all(&response_value.serialize())
@@ -512,13 +519,25 @@ impl Engine {
                         client_info.capabilities.insert(capa);
 
                         RespValue::SimpleString("OK".into())
+                    } else if args.len() == 2 && args[0].to_lowercase() == "ack" {
+                        unimplemented!()
                     } else {
                         RespValue::SimpleError(
                             "ERR unrecognized argument for 'replconf' command".into(),
                         )
                     }
                 } else {
-                    RespValue::SimpleError("ERR writer commands on a non-writer node".into())
+                    // Reader.
+                    if args.len() == 2 && args[0].to_lowercase() == "getack" {
+                        // TODO: Make it real.
+                        RespValue::Array(vec![
+                            RespValue::BulkString("REPLCONF".into()),
+                            RespValue::BulkString("ACK".into()),
+                            RespValue::BulkString("0".into()),
+                        ])
+                    } else {
+                        RespValue::SimpleError("ERR writer commands on a non-writer node".into())
+                    }
                 }
             }
 
@@ -707,7 +726,7 @@ impl Engine {
         Ok(())
     }
 
-    async fn psync(
+    async fn writer_propagation_handle(
         &self,
         stream: &mut TcpStream,
         request_count: u64,
