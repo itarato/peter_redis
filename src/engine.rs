@@ -103,6 +103,7 @@ impl Engine {
         let mut stream_reader = StreamReader::new(&mut stream);
 
         self.handshake(server_port, &mut stream_reader).await?;
+        stream_reader.reset_byte_counter();
 
         self.listen_for_replication_updates(&mut stream_reader)
             .await?;
@@ -122,11 +123,14 @@ impl Engine {
                     debug!("Reader replicates command: {:?}", &command);
 
                     if command.is_replconf() {
-                        self.execute_and_reply(&command, None, stream_reader.get_mut())
+                        self.execute_and_reply(&command, None, stream_reader)
                             .await?;
                     } else {
-                        self.execute_only(&command, None).await?;
+                        self.execute_only(&command, None, stream_reader.byte_count)
+                            .await?;
                     }
+
+                    stream_reader.commit_byte_count();
                 }
                 None => {
                     debug!("Reader listening has ended due to stream closing");
@@ -198,11 +202,12 @@ impl Engine {
         &self,
         command: &Command,
         request_count: u64,
-        stream: &mut TcpStream,
+        stream_reader: &mut StreamReader<'_>,
     ) -> Result<(), Error> {
         if !command.is_exec() && !command.is_discard() && self.is_transaction(request_count).await {
             if command.is_multi() {
-                stream
+                stream_reader
+                    .get_mut()
                     .write_all(
                         &RespValue::SimpleString("ERR MULTI calls can not be nested".to_string())
                             .serialize(),
@@ -216,16 +221,17 @@ impl Engine {
                     transactions.push(command.clone());
                 }
 
-                stream
+                stream_reader
+                    .get_mut()
                     .write_all(&RespValue::SimpleString("QUEUED".to_string()).serialize())
                     .await
                     .context("write-simple-value-back-to-stream")?;
             }
         } else if command.is_psync() {
-            self.writer_propagation_handle(stream, request_count, command)
+            self.writer_propagation_handle(stream_reader.get_mut(), request_count, command)
                 .await?;
         } else {
-            self.execute_and_reply(command, Some(request_count), stream)
+            self.execute_and_reply(command, Some(request_count), stream_reader)
                 .await?;
         }
 
@@ -236,11 +242,14 @@ impl Engine {
         &self,
         command: &Command,
         request_count: Option<u64>,
-        stream: &mut TcpStream,
+        stream_reader: &mut StreamReader<'_>,
     ) -> Result<(), Error> {
-        let response_value = self.execute_only(command, request_count).await?;
+        let response_value = self
+            .execute_only(command, request_count, stream_reader.byte_count)
+            .await?;
 
-        stream
+        stream_reader
+            .get_mut()
             .write_all(&response_value.serialize())
             .await
             .context("write-simple-value-back-to-stream")?;
@@ -252,6 +261,7 @@ impl Engine {
         &self,
         command: &Command,
         request_count: Option<u64>,
+        incoming_byte_count_overall: usize,
     ) -> Result<RespValue, Error> {
         let value = match command {
             Command::Ping => RespValue::SimpleString("PONG".to_string()),
@@ -443,8 +453,12 @@ impl Engine {
                     Some(commands) => {
                         let mut subvalues = vec![];
                         for command in commands {
-                            let subvalue =
-                                Box::pin(self.execute_only(&command, request_count)).await?;
+                            let subvalue = Box::pin(self.execute_only(
+                                &command,
+                                request_count,
+                                incoming_byte_count_overall,
+                            ))
+                            .await?;
 
                             subvalues.push(subvalue);
                         }
@@ -532,7 +546,7 @@ impl Engine {
                         RespValue::Array(vec![
                             RespValue::BulkString("REPLCONF".into()),
                             RespValue::BulkString("ACK".into()),
-                            RespValue::BulkString("0".into()),
+                            RespValue::BulkString(incoming_byte_count_overall.to_string()),
                         ])
                     } else {
                         RespValue::SimpleError("ERR writer commands on a non-writer node".into())

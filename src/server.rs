@@ -73,7 +73,9 @@ impl Server {
                     Ok(command) => {
                         debug!("Received command: {:?}", command);
                         // TODO: get rid of passing raw stream. Use buf reader everywhere.
-                        engine.execute(&command, request_count, &mut stream).await?;
+                        engine
+                            .execute(&command, request_count, &mut stream_reader)
+                            .await?;
                     }
                     Err(err) => {
                         stream

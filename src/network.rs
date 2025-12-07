@@ -8,17 +8,30 @@ use crate::{common::Error, resp::RespValue};
 
 pub(crate) struct StreamReader<'a> {
     buf_reader: BufReader<&'a mut TcpStream>,
+    uncommitted_byte_count: usize,
+    pub(crate) byte_count: usize,
 }
 
 impl<'a> StreamReader<'a> {
     pub(crate) fn new(stream: &'a mut TcpStream) -> Self {
         Self {
             buf_reader: BufReader::new(stream),
+            uncommitted_byte_count: 0,
+            byte_count: 0,
         }
     }
 
     pub(crate) fn get_mut(&mut self) -> &mut TcpStream {
         self.buf_reader.get_mut()
+    }
+
+    pub(crate) fn reset_byte_counter(&mut self) {
+        self.uncommitted_byte_count = 0;
+        self.byte_count = 0;
+    }
+
+    pub(crate) fn commit_byte_count(&mut self) {
+        self.byte_count = self.uncommitted_byte_count;
     }
 
     pub(crate) async fn read_resp_value_from_buf_reader(
@@ -85,6 +98,7 @@ impl<'a> StreamReader<'a> {
             .read_line(&mut buf)
             .await
             .context("number-read")?;
+        self.uncommitted_byte_count += buf.len();
 
         debug!(
             "Incoming {} bytes from TcpStream [{}] (RC: {:?})",
@@ -105,6 +119,7 @@ impl<'a> StreamReader<'a> {
             .read_line(&mut size_raw)
             .await
             .context("read-bulk-bytes-size")?;
+        self.uncommitted_byte_count += size_raw.len();
 
         let size_raw = size_raw.trim_end();
 
@@ -126,6 +141,7 @@ impl<'a> StreamReader<'a> {
             .read_exact(&mut buf[0..size])
             .await
             .context("number-read")?;
+        self.uncommitted_byte_count += read_size;
 
         if read_size != size {
             return Err(
