@@ -556,7 +556,14 @@ impl Engine {
 
             Command::Psync(_replication_id, _offset) => unreachable!(),
 
-            Command::Wait(_replica_count, _timeout_ms) => RespValue::Integer(0),
+            Command::Wait(_replica_count, _timeout_ms) => {
+                let ReplicationRole::Writer(ref writer) = *self.replication_role.read().await
+                else {
+                    return Err("Wait command on a non writer instance".into());
+                };
+
+                RespValue::Integer(writer.clients.len() as i64)
+            }
 
             Command::Unknown(msg) => {
                 RespValue::SimpleError(format!("Unrecognized command: {}", msg))
