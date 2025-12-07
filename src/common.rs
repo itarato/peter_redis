@@ -1,18 +1,10 @@
+use crate::commands::Command;
+use rand::rng;
+use rand::RngCore;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::u128;
-
-use anyhow::Context;
-use rand::rng;
-use rand::RngCore;
-use tokio::io::AsyncBufReadExt;
-use tokio::io::AsyncReadExt;
-use tokio::io::BufReader;
-use tokio::net::TcpStream;
-
-use crate::commands::Command;
-use crate::resp::RespValue;
 
 pub(crate) type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -186,121 +178,4 @@ pub(crate) fn new_master_replid() -> String {
     rnd.fill_bytes(&mut bytes);
 
     bytes.map(|b| format!("{:x}", b)).join("")
-}
-
-pub(crate) async fn read_resp_value_from_buf_reader(
-    buf_reader: &mut BufReader<&mut TcpStream>,
-    request_count: Option<u64>,
-) -> Result<Option<RespValue>, Error> {
-    read_resp_value(buf_reader, request_count).await
-}
-
-async fn read_resp_value(
-    buf_reader: &mut BufReader<&mut TcpStream>,
-    request_count: Option<u64>,
-) -> Result<Option<RespValue>, Error> {
-    let line = read_line_from_tcp_stream(buf_reader, request_count).await?;
-
-    if line.is_empty() {
-        return Ok(None);
-    } else if line.starts_with("+") {
-        return Ok(Some(RespValue::SimpleString(line[1..].trim().to_string())));
-    } else if line.starts_with("$") {
-        let bulk_str_len =
-            usize::from_str_radix(&line[1..].trim(), 10).context("parse-bulk-str-len")?;
-
-        let next_line = read_line_from_tcp_stream(buf_reader, request_count).await?;
-
-        if next_line.trim().len() != bulk_str_len {
-            return Err(format!(
-                "Bulk string len mismatch. Expected {}, got {}. Bulk string: {}",
-                bulk_str_len,
-                next_line.len(),
-                &next_line
-            )
-            .into());
-        }
-
-        return Ok(Some(RespValue::BulkString(next_line.trim().to_string())));
-    } else if line.starts_with("*") {
-        let array_len = usize::from_str_radix(&line[1..].trim(), 10).context("parse-array-len")?;
-        let mut items = vec![];
-
-        for _ in 0..array_len {
-            match Box::pin(read_resp_value(buf_reader, request_count)).await? {
-                Some(item) => items.push(item),
-                None => return Err("Missing array item".into()),
-            }
-        }
-
-        return Ok(Some(RespValue::Array(items)));
-    } else if line.starts_with(":") {
-        let v = i64::from_str_radix(&line[1..].trim(), 10).context("parse-array-len")?;
-        return Ok(Some(RespValue::Integer(v)));
-    }
-
-    Err(format!("Unexpected incoming RESP string from connection: {}", line).into())
-}
-
-async fn read_line_from_tcp_stream(
-    buf_reader: &mut BufReader<&mut TcpStream>,
-    request_count: Option<u64>,
-) -> Result<String, Error> {
-    let mut buf = String::new();
-    buf_reader
-        .read_line(&mut buf)
-        .await
-        .context("number-read")?;
-
-    debug!(
-        "Incoming {} bytes from TcpStream [{}] (RC: {:?})",
-        buf.len(),
-        buf.trim_end(),
-        request_count
-    );
-
-    Ok(buf)
-}
-
-pub(crate) async fn read_bulk_bytes_from_tcp_stream(
-    buf_reader: &mut BufReader<&mut TcpStream>,
-    request_count: Option<u64>,
-) -> Result<Vec<u8>, Error> {
-    let mut size_raw = String::new();
-    buf_reader
-        .read_line(&mut size_raw)
-        .await
-        .context("read-bulk-bytes-size")?;
-
-    let size_raw = size_raw.trim_end();
-
-    if !size_raw.starts_with("$") {
-        let next = read_line_from_tcp_stream(buf_reader, request_count).await?;
-        return Err(format!(
-            "Invalid start of size for bulk bytes. Got: {} (Next: {}) (RC: {:?})",
-            size_raw, next, request_count
-        )
-        .into());
-    }
-
-    let size = usize::from_str_radix(&size_raw[1..], 10).context("convert-size-to-usize")?;
-
-    let mut buf = Vec::with_capacity(size);
-    buf.resize(size, 0);
-    let read_size = buf_reader
-        .read_exact(&mut buf[0..size])
-        .await
-        .context("number-read")?;
-
-    if read_size != size {
-        return Err(format!("Read size mismatch. Read {}. Expected {}.", read_size, size).into());
-    }
-
-    debug!(
-        "Incoming {} bytes from TcpStream (RC: {:?})",
-        buf.len(),
-        request_count
-    );
-
-    Ok(buf)
 }

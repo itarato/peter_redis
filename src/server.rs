@@ -2,14 +2,12 @@ use std::{cell::Cell, sync::Arc};
 
 use anyhow::Context;
 use tokio::{
-    io::{AsyncWriteExt, BufReader},
+    io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
 };
 
 use crate::{
-    command_parser::CommandParser,
-    common::{read_resp_value_from_buf_reader, Error},
-    engine::Engine,
+    command_parser::CommandParser, common::Error, engine::Engine, network::StreamReader,
     resp::RespValue,
 };
 
@@ -66,8 +64,11 @@ impl Server {
         request_count: u64,
     ) -> Result<(), Error> {
         loop {
-            let mut buf_reader = BufReader::new(&mut stream);
-            match read_resp_value_from_buf_reader(&mut buf_reader, Some(request_count)).await? {
+            let mut stream_reader = StreamReader::new(&mut stream);
+            match stream_reader
+                .read_resp_value_from_buf_reader(Some(request_count))
+                .await?
+            {
                 Some(input) => match CommandParser::parse(input) {
                     Ok(command) => {
                         debug!("Received command: {:?}", command);

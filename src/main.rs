@@ -7,10 +7,11 @@ mod commands;
 mod common;
 mod database;
 mod engine;
+mod network;
 mod resp;
 mod server;
 
-use std::env;
+// use std::env;
 
 use log::info;
 
