@@ -18,9 +18,14 @@ pub(crate) struct Server {
 }
 
 impl Server {
-    pub(crate) fn new(port: u16, replica_of: Option<(String, u16)>) -> Self {
+    pub(crate) fn new(
+        port: u16,
+        replica_of: Option<(String, u16)>,
+        dir: String,
+        dbfilename: String,
+    ) -> Self {
         Self {
-            engine: Arc::new(Engine::new(replica_of)),
+            engine: Arc::new(Engine::new(replica_of, dir, dbfilename)),
             request_counter: Cell::new(0),
             port,
         }

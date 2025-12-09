@@ -369,6 +369,22 @@ impl CommandParser {
                         return Ok(Command::Wait(replica_count, timeout_ms));
                     }
 
+                    if name.to_lowercase() == "config" {
+                        let items_len = items.len();
+                        if items.len() < 3 {
+                            return Err("ERR wrong number of arguments for 'config' command".into());
+                        }
+
+                        let mut str_items = Self::get_strings_exact(items, items_len, "config")?;
+                        str_items.remove(0); // Word config.
+                        let kind = str_items.remove(0);
+                        if kind.to_lowercase() == "get" {
+                            return Ok(Command::GetConfig(str_items));
+                        }
+
+                        return Err("ERR wrong get/set kind for 'config' command".into());
+                    }
+
                     return Ok(Command::Unknown(name.to_lowercase()));
                 } else {
                     return Ok(Command::Unknown("not-a-string".to_string()));

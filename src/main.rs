@@ -24,6 +24,12 @@ struct Args {
 
     #[arg(long)]
     replicaof: Option<String>,
+
+    #[arg(long, default_value_t = String::from("/tmp/redis-files"))]
+    dir: String,
+
+    #[arg(long, default_value_t = String::from("dump.rdb"))]
+    dbfilename: String,
 }
 
 impl Args {
@@ -49,7 +55,12 @@ async fn main() -> Result<(), Error> {
 
     let args = Args::parse();
 
-    let server = Server::new(args.port, args.parsed_replica_of());
+    let server = Server::new(
+        args.port,
+        args.parsed_replica_of(),
+        args.dir,
+        args.dbfilename,
+    );
     server.run().await?;
 
     info!("Peter-Redis ending");

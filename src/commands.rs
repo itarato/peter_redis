@@ -34,6 +34,7 @@ pub(crate) enum Command {
         usize, /* number of replicas */
         u128,  /* timeout ms */
     ),
+    GetConfig(Vec<String> /* Arguments */),
     // ---
     Unknown(String),
 }
@@ -104,6 +105,7 @@ impl Command {
             Command::Psync(_, _) => false,
             Command::Unknown(_) => false,
             Command::Wait(_, _) => false,
+            Command::GetConfig(_) => false,
         }
     }
 

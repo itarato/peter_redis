@@ -30,6 +30,8 @@ enum ArrayDirection {
 
 pub(crate) struct Engine {
     db: RwLock<Database>,
+    dir: String,
+    dbfilename: String,
     transaction_store: Mutex<HashMap<u64, Vec<Command>>>,
     replication_role: RwLock<ReplicationRole>,
     stream_notify: Arc<Notify>,
@@ -38,7 +40,7 @@ pub(crate) struct Engine {
 }
 
 impl Engine {
-    pub(crate) fn new(replica_of: Option<(String, u16)>) -> Self {
+    pub(crate) fn new(replica_of: Option<(String, u16)>, dir: String, dbfilename: String) -> Self {
         let replication_role = match replica_of {
             Some((host, port)) => ReplicationRole::Reader(ReaderRole {
                 writer_host: host,
@@ -54,6 +56,8 @@ impl Engine {
 
         Self {
             db: RwLock::new(Database::new()),
+            dir,
+            dbfilename,
             stream_notify: Arc::new(Notify::new()),
             transaction_store: Mutex::new(HashMap::new()),
             replication_role: RwLock::new(replication_role),
@@ -580,6 +584,24 @@ impl Engine {
             Command::Wait(replica_count, timeout_ms) => {
                 let up_to_date_replica_count = self.wait(*replica_count, *timeout_ms).await?;
                 RespValue::Integer(up_to_date_replica_count)
+            }
+
+            Command::GetConfig(params) => {
+                let mut values = vec![];
+
+                for param in params {
+                    if param.to_lowercase() == "dir" {
+                        values.push(RespValue::BulkString("dir".into()));
+                        values.push(RespValue::BulkString(self.dir.clone()));
+                    } else if param.to_lowercase() == "dbfilename" {
+                        values.push(RespValue::BulkString("dbfilename".into()));
+                        values.push(RespValue::BulkString(self.dbfilename.clone()));
+                    } else {
+                        error!("Unrecognized get parameter: {}", param);
+                    }
+                }
+
+                RespValue::Array(values)
             }
 
             Command::Unknown(msg) => {
