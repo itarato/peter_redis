@@ -212,6 +212,5 @@ pub(crate) fn new_master_replid() -> String {
     let mut rnd = rng();
     let mut bytes: [u8; 20] = [0; 20];
     rnd.fill_bytes(&mut bytes);
-
     bytes.map(|b| format!("{:x}", b)).join("")
 }

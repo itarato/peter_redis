@@ -30,9 +30,9 @@ enum ArrayDirection {
 
 pub(crate) struct Engine {
     db: RwLock<Database>,
-    stream_notify: Arc<Notify>,
     transaction_store: Mutex<HashMap<u64, Vec<Command>>>,
     replication_role: RwLock<ReplicationRole>,
+    stream_notify: Arc<Notify>,
     wr_cmd_propagation_notify: Notify,
     wr_read_client_offset_notify: Arc<Notify>,
 }
@@ -63,21 +63,18 @@ impl Engine {
     }
 
     pub(crate) async fn init(&self, server_port: u16) -> Result<(), Error> {
-        if self.replication_role.read().await.is_writer() {
-            Ok(())
-        } else if self.replication_role.read().await.is_reader() {
-            self.read_replication_handle(server_port).await
+        if self.replication_role.read().await.is_reader() {
+            self.handle_replication_connection(server_port).await
         } else {
-            unreachable!()
+            Ok(())
         }
     }
 
-    async fn read_replication_handle(&self, server_port: u16) -> Result<(), Error> {
+    async fn handle_replication_connection(&self, server_port: u16) -> Result<(), Error> {
         let (writer_host, writer_port) = {
             let ReplicationRole::Reader(ref reader) = *self.replication_role.read().await else {
                 unreachable!();
             };
-
             (reader.writer_host.clone(), reader.writer_port)
         };
 
@@ -105,7 +102,8 @@ impl Engine {
             .context("connecting-to-writer")?;
         let mut stream_reader = StreamReader::new(&mut stream);
 
-        self.handshake(server_port, &mut stream_reader).await?;
+        self.replica_handshake(server_port, &mut stream_reader)
+            .await?;
         stream_reader.reset_byte_counter();
 
         self.listen_for_replication_updates(&mut stream_reader)
@@ -143,7 +141,7 @@ impl Engine {
         }
     }
 
-    async fn handshake(
+    async fn replica_handshake(
         &self,
         server_port: u16,
         stream_reader: &mut StreamReader<'_>,
@@ -231,7 +229,7 @@ impl Engine {
                     .context("write-simple-value-back-to-stream")?;
             }
         } else if command.is_psync() {
-            self.writer_propagation_handle(stream_reader, request_count, command)
+            self.handle_replica_connection(stream_reader, request_count, command)
                 .await?;
         } else {
             self.execute_and_reply(command, Some(request_count), stream_reader)
@@ -272,7 +270,7 @@ impl Engine {
         &self,
         command: &Command,
         request_count: Option<u64>,
-        incoming_byte_count_overall: usize,
+        current_offset: usize,
     ) -> Result<RespValue, Error> {
         let value = match command {
             Command::Ping => RespValue::SimpleString("PONG".to_string()),
@@ -467,7 +465,7 @@ impl Engine {
                             let subvalue = Box::pin(self.execute_only(
                                 &command,
                                 request_count,
-                                incoming_byte_count_overall,
+                                current_offset,
                             ))
                             .await?;
 
@@ -564,15 +562,12 @@ impl Engine {
                 } else {
                     // Reader.
                     if args.len() == 2 && args[0].to_lowercase() == "getack" {
-                        debug!(
-                            "WAIT#3 - client sends offset {}",
-                            incoming_byte_count_overall
-                        );
+                        debug!("WAIT#3 - client sends offset {}", current_offset);
 
                         RespValue::Array(vec![
                             RespValue::BulkString("REPLCONF".into()),
                             RespValue::BulkString("ACK".into()),
-                            RespValue::BulkString(incoming_byte_count_overall.to_string()),
+                            RespValue::BulkString(current_offset.to_string()),
                         ])
                     } else {
                         RespValue::SimpleError("ERR writer commands on a non-writer node".into())
@@ -592,7 +587,7 @@ impl Engine {
             }
         };
 
-        if command.is_write() {
+        if command.for_replication() {
             if self.replication_role.read().await.is_writer() {
                 self.replication_role
                     .write()
@@ -851,7 +846,7 @@ impl Engine {
         Ok(())
     }
 
-    async fn writer_propagation_handle(
+    async fn handle_replica_connection(
         &self,
         stream_reader: &mut StreamReader<'_>,
         request_count: u64,

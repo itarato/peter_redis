@@ -74,7 +74,7 @@ impl Command {
         }
     }
 
-    pub(crate) fn is_write(&self) -> bool {
+    pub(crate) fn for_replication(&self) -> bool {
         match self {
             Command::Set(_, _, _) => true,
             Command::Rpush(_, _) => true,
