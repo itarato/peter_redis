@@ -51,7 +51,7 @@ impl Server {
                 async move {
                     match Self::handle_request(stream, engine, request_count).await {
                         Ok(_) => debug!("Request completed"),
-                        Err(err) => error!("Request has failed with reason: {}", err),
+                        Err(err) => error!("Request has failed with reason: {:#?}", err),
                     }
                 }
             });

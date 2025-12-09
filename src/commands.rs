@@ -83,11 +83,11 @@ impl Command {
             Command::Rpop(_) => true,
             Command::Lpopn(_, _) => true,
             Command::Rpopn(_, _) => true,
-            Command::Blpop(_, _) => true,
-            Command::Brpop(_, _) => true,
             Command::Xadd(_, _, _) => true,
             Command::Incr(_) => true,
             // ---
+            Command::Blpop(_, _) => false,
+            Command::Brpop(_, _) => false,
             Command::Ping => false,
             Command::Echo(_) => false,
             Command::Get(_) => false,

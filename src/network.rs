@@ -94,10 +94,10 @@ impl<'a> StreamReader<'a> {
         request_count: Option<u64>,
     ) -> Result<String, Error> {
         let mut buf = String::new();
-        self.buf_reader
-            .read_line(&mut buf)
-            .await
-            .context("number-read")?;
+        self.buf_reader.read_line(&mut buf).await.context(format!(
+            "reading-line-from-tcpstream-req{:?}",
+            request_count
+        ))?;
         self.uncommitted_byte_count += buf.len();
 
         debug!(
@@ -140,7 +140,7 @@ impl<'a> StreamReader<'a> {
             .buf_reader
             .read_exact(&mut buf[0..size])
             .await
-            .context("number-read")?;
+            .context(format!("reading-bulk-bytes-with-len-{}", size))?;
         self.uncommitted_byte_count += read_size;
 
         if read_size != size {

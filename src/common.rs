@@ -27,10 +27,20 @@ impl ClientCapability {
     }
 }
 
+#[derive(PartialEq, Eq)]
+pub(crate) enum ClientOffsetUpdate {
+    UpdateRequested,
+    Updating,
+    Idle,
+}
+
 pub(crate) struct ClientInfo {
     pub(crate) port: Option<u16>,
     pub(crate) capabilities: HashSet<ClientCapability>,
-    pub(crate) current_offset: i64,
+    last_synced_command_index: i64,
+    // TODO: Make this usize.
+    pub(crate) offset: i64,
+    pub(crate) offset_update: ClientOffsetUpdate,
 }
 
 impl ClientInfo {
@@ -38,14 +48,16 @@ impl ClientInfo {
         Self {
             port: None,
             capabilities: HashSet::new(),
-            current_offset: -1,
+            last_synced_command_index: -1,
+            offset: 0,
+            offset_update: ClientOffsetUpdate::Idle,
         }
     }
 }
 
 pub(crate) struct WriterRole {
     pub(crate) replid: String,
-    pub(crate) offset: u64,
+    pub(crate) offset: usize,
     //                          vvv--request-count
     pub(crate) clients: HashMap<u64, ClientInfo>,
     pub(crate) write_queue: VecDeque<Command>,
@@ -53,6 +65,7 @@ pub(crate) struct WriterRole {
 
 impl WriterRole {
     pub(crate) fn push_write_command(&mut self, command: Command) {
+        self.offset += command.into_resp().serialize().len();
         self.write_queue.push_back(command);
     }
 
@@ -62,7 +75,7 @@ impl WriterRole {
             .get_mut(&request_count)
             .expect("loading client info");
 
-        let last_read_index = client_info.current_offset;
+        let last_read_index = client_info.last_synced_command_index;
         let latest_readable_index = self.write_queue.len() as i64 - 1;
 
         if latest_readable_index == last_read_index {
@@ -77,9 +90,26 @@ impl WriterRole {
             out.push(self.write_queue[i as usize].clone());
         }
 
-        client_info.current_offset = latest_readable_index;
+        client_info.last_synced_command_index = latest_readable_index;
 
         out
+    }
+
+    pub(crate) fn update_client_offset(&mut self, request_count: u64, offset: i64) {
+        let client_info = self
+            .clients
+            .get_mut(&request_count)
+            .expect("Missing client");
+        client_info.offset = offset;
+        client_info.offset_update = ClientOffsetUpdate::Idle;
+    }
+
+    pub(crate) fn reset_client_offset_state(&mut self, request_count: u64) {
+        let client_info = self
+            .clients
+            .get_mut(&request_count)
+            .expect("Missing client");
+        client_info.offset_update = ClientOffsetUpdate::Idle;
     }
 }
 
@@ -104,6 +134,13 @@ impl ReplicationRole {
     }
 
     pub(crate) fn writer_mut(&mut self) -> &mut WriterRole {
+        match self {
+            ReplicationRole::Writer(writer) => writer,
+            _ => panic!("Caller must ensure role is writer"),
+        }
+    }
+
+    pub(crate) fn writer(&self) -> &WriterRole {
         match self {
             ReplicationRole::Writer(writer) => writer,
             _ => panic!("Caller must ensure role is writer"),

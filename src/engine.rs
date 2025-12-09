@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     sync::Arc,
     time::Duration,
 };
@@ -7,8 +7,9 @@ use std::{
 use anyhow::Context;
 use tokio::{
     io::AsyncWriteExt,
-    net::{TcpSocket, TcpStream},
+    net::TcpSocket,
     sync::{Mutex, Notify, RwLock},
+    time::timeout,
 };
 
 use crate::{
@@ -29,10 +30,11 @@ enum ArrayDirection {
 
 pub(crate) struct Engine {
     db: RwLock<Database>,
-    notification: Arc<Notify>,
+    stream_notify: Arc<Notify>,
     transaction_store: Mutex<HashMap<u64, Vec<Command>>>,
     replication_role: RwLock<ReplicationRole>,
-    write_queue_notification: Notify,
+    wr_cmd_propagation_notify: Notify,
+    wr_read_client_offset_notify: Arc<Notify>,
 }
 
 impl Engine {
@@ -52,10 +54,11 @@ impl Engine {
 
         Self {
             db: RwLock::new(Database::new()),
-            notification: Arc::new(Notify::new()),
+            stream_notify: Arc::new(Notify::new()),
             transaction_store: Mutex::new(HashMap::new()),
             replication_role: RwLock::new(replication_role),
-            write_queue_notification: Notify::new(),
+            wr_cmd_propagation_notify: Notify::new(),
+            wr_read_client_offset_notify: Arc::new(Notify::new()),
         }
     }
 
@@ -228,7 +231,7 @@ impl Engine {
                     .context("write-simple-value-back-to-stream")?;
             }
         } else if command.is_psync() {
-            self.writer_propagation_handle(stream_reader.get_mut(), request_count, command)
+            self.writer_propagation_handle(stream_reader, request_count, command)
                 .await?;
         } else {
             self.execute_and_reply(command, Some(request_count), stream_reader)
@@ -248,11 +251,19 @@ impl Engine {
             .execute_only(command, request_count, stream_reader.byte_count)
             .await?;
 
+        debug!(
+            "Server writing result to TcpStream: {:?} ({} bytes)",
+            response_value,
+            response_value.serialize().len()
+        );
+
         stream_reader
             .get_mut()
             .write_all(&response_value.serialize())
             .await
             .context("write-simple-value-back-to-stream")?;
+
+        debug!("Server write completed");
 
         Ok(())
     }
@@ -337,7 +348,7 @@ impl Engine {
                     .stream_push(key.clone(), id.clone(), entries.clone())
                 {
                     Ok(final_id) => {
-                        self.notification.notify_one();
+                        self.stream_notify.notify_one();
                         RespValue::BulkString(final_id.to_string())
                     }
                     Err(err) => RespValue::SimpleError(err),
@@ -421,7 +432,7 @@ impl Engine {
                     let ttl = end_ms - now_ms;
 
                     tokio::spawn({
-                        let notification = self.notification.clone();
+                        let notification = self.stream_notify.clone();
 
                         async move {
                             tokio::time::sleep(Duration::from_millis(ttl as u64)).await;
@@ -429,7 +440,7 @@ impl Engine {
                         }
                     });
 
-                    self.notification.notified().await;
+                    self.stream_notify.notified().await;
                 }
             }
 
@@ -533,7 +544,18 @@ impl Engine {
 
                         RespValue::SimpleString("OK".into())
                     } else if args.len() == 2 && args[0].to_lowercase() == "ack" {
-                        unimplemented!()
+                        debug!("WAIT#4 - client offset response arrived");
+
+                        let client_offset = i64::from_str_radix(&args[1], 10)?;
+                        self.replication_role
+                            .write()
+                            .await
+                            .writer_mut()
+                            .update_client_offset(request_count.unwrap(), client_offset);
+
+                        self.wr_read_client_offset_notify.notify_one();
+
+                        RespValue::NullBulkString
                     } else {
                         RespValue::SimpleError(
                             "ERR unrecognized argument for 'replconf' command".into(),
@@ -542,7 +564,11 @@ impl Engine {
                 } else {
                     // Reader.
                     if args.len() == 2 && args[0].to_lowercase() == "getack" {
-                        // TODO: Make it real.
+                        debug!(
+                            "WAIT#3 - client sends offset {}",
+                            incoming_byte_count_overall
+                        );
+
                         RespValue::Array(vec![
                             RespValue::BulkString("REPLCONF".into()),
                             RespValue::BulkString("ACK".into()),
@@ -556,13 +582,9 @@ impl Engine {
 
             Command::Psync(_replication_id, _offset) => unreachable!(),
 
-            Command::Wait(_replica_count, _timeout_ms) => {
-                let ReplicationRole::Writer(ref writer) = *self.replication_role.read().await
-                else {
-                    return Err("Wait command on a non writer instance".into());
-                };
-
-                RespValue::Integer(writer.clients.len() as i64)
+            Command::Wait(replica_count, timeout_ms) => {
+                let up_to_date_replica_count = self.wait(*replica_count, *timeout_ms).await?;
+                RespValue::Integer(up_to_date_replica_count)
             }
 
             Command::Unknown(msg) => {
@@ -577,11 +599,86 @@ impl Engine {
                     .await
                     .writer_mut()
                     .push_write_command(command.clone());
-                self.write_queue_notification.notify_waiters();
+                self.wr_cmd_propagation_notify.notify_waiters();
             }
         }
 
         Ok(value)
+    }
+
+    async fn wait(&self, replica_count: usize, timeout_ms: u128) -> Result<i64, Error> {
+        let mut up_to_date_replicas = HashSet::new();
+        let writer_offset = self.replication_role.read().await.writer().offset;
+        let end_ms = current_time_ms() + timeout_ms;
+
+        debug!("WAIT#1 - start (expected offset: {})", writer_offset);
+
+        loop {
+            let mut need_client_notification = false;
+
+            {
+                let ReplicationRole::Writer(ref mut writer) = *self.replication_role.write().await
+                else {
+                    return Err("Wait command on a non writer instance".into());
+                };
+
+                debug!("WAIT#1 - Examining {} clients", writer.clients.len());
+                for (client_request_count, client_info) in writer.clients.iter_mut() {
+                    if client_info.offset >= writer_offset as i64 {
+                        up_to_date_replicas.insert(*client_request_count);
+                        debug!(
+                            "WAIT#1 - found client with sufficient offset ({})",
+                            client_info.offset
+                        );
+                    } else {
+                        if client_info.offset_update == ClientOffsetUpdate::Idle {
+                            client_info.offset_update = ClientOffsetUpdate::UpdateRequested;
+                            need_client_notification = true;
+                            debug!(
+                                "WAIT#1 - notify client with insufficient offset ({})",
+                                client_info.offset
+                            );
+                        } else {
+                            debug!(
+                                "WAIT#1 - client with insufficient offset [no notification] ({})",
+                                client_info.offset
+                            );
+                        }
+                    }
+                }
+            }
+
+            debug!(
+                "WAIT#1 - current up to date client count = {}",
+                up_to_date_replicas.len()
+            );
+
+            let current_ms = current_time_ms();
+            if up_to_date_replicas.len() < replica_count && current_ms < end_ms {
+                debug!("WAIT#1 - notifying writer propagators to send client requests");
+                if need_client_notification {
+                    self.wr_cmd_propagation_notify.notify_waiters();
+                }
+
+                tokio::spawn({
+                    let wr_read_client_offset_notify = self.wr_read_client_offset_notify.clone();
+                    async move {
+                        tokio::time::sleep(Duration::from_millis((end_ms - current_ms) as u64))
+                            .await;
+                        wr_read_client_offset_notify.notify_one();
+                    }
+                });
+
+                // Wait for readers to finish.
+                self.wr_read_client_offset_notify.notified().await;
+            } else {
+                debug!(
+                    "WAIT#1 - return (ms left: {})",
+                    end_ms as i64 - current_ms as i64
+                );
+                break Ok(up_to_date_replicas.len() as i64);
+            }
+        }
     }
 
     fn stream_to_resp(stream_entry: StreamEntry) -> RespValue {
@@ -629,7 +726,7 @@ impl Engine {
         };
         match result {
             Ok(count) => {
-                self.notification.notify_one();
+                self.stream_notify.notify_one();
                 Ok(RespValue::Integer(count as i64))
             }
             Err(err) => Ok(RespValue::SimpleError(err)),
@@ -699,15 +796,15 @@ impl Engine {
             }
 
             tokio::spawn({
-                let notification = self.notification.clone();
+                let stream_notify = self.stream_notify.clone();
 
                 async move {
                     tokio::time::sleep(Duration::from_secs_f64(ttl)).await;
-                    notification.notify_waiters();
+                    stream_notify.notify_waiters();
                 }
             });
 
-            self.notification.notified().await;
+            self.stream_notify.notified().await;
         }
     }
 
@@ -721,8 +818,13 @@ impl Engine {
     async fn section_info(&self, section: &str) -> String {
         match section {
             "replication" => match *self.replication_role.read().await {
-                ReplicationRole::Writer(ref role) => format!("# Replication\r\nrole:master\r\nmaster_replid:{}\r\nmaster_repl_offset:{}\r\n\r\n", role.replid, role.offset),
-                ReplicationRole::Reader(ref _role) => "# Replication\r\nrole:slave\r\n\r\n".to_string(),
+                ReplicationRole::Writer(ref role) => {
+                    let writer_offset = self.replication_role.read().await.writer().offset;
+                    format!("# Replication\r\nrole:master\r\nmaster_replid:{}\r\nmaster_repl_offset:{}\r\n\r\n", role.replid, writer_offset)
+                }
+                ReplicationRole::Reader(ref _role) => {
+                    "# Replication\r\nrole:slave\r\n\r\n".to_string()
+                }
             },
             _ => String::new(),
         }
@@ -751,7 +853,7 @@ impl Engine {
 
     async fn writer_propagation_handle(
         &self,
-        stream: &mut TcpStream,
+        stream_reader: &mut StreamReader<'_>,
         request_count: u64,
         command: &Command,
     ) -> Result<(), Error> {
@@ -760,7 +862,8 @@ impl Engine {
         };
 
         if !self.replication_role.read().await.is_writer() {
-            stream
+            stream_reader
+                .get_mut()
                 .write_all(
                     &RespValue::SimpleError("ERR writer commands on a non-writer node".into())
                         .serialize(),
@@ -784,7 +887,11 @@ impl Engine {
                 .entry(request_count)
                 .or_insert(ClientInfo::new());
 
-            client_info.current_offset = *offset;
+            if *offset >= 0 {
+                client_info.offset = *offset;
+            } else {
+                debug!("Ignoring negative psync offset");
+            }
         }
 
         let fake_rdb_file_bytes_str = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
@@ -795,33 +902,111 @@ impl Engine {
             })
             .collect::<Vec<_>>();
 
-        stream
+        stream_reader
+            .get_mut()
             .write_all(
                 &RespValue::SimpleString(format!("FULLRESYNC {} 0", writer_replid)).serialize(),
             )
             .await
             .context("write-simple-value-back-to-stream")?;
 
-        stream
+        stream_reader
+            .get_mut()
             .write_all(&RespValue::BulkBytes(fake_rdb_file_bytes).serialize())
             .await
             .context("write-simple-value-back-to-stream")?;
 
         loop {
             let write_commands;
+            let client_offset_update_request;
             {
                 let mut writer_guard = self.replication_role.write().await;
                 let writer = writer_guard.writer_mut();
                 write_commands = writer.pop_write_command(request_count);
+                client_offset_update_request = writer
+                    .clients
+                    .get(&request_count)
+                    .expect("Missing client")
+                    .offset_update
+                    == ClientOffsetUpdate::UpdateRequested;
+
+                if client_offset_update_request {
+                    writer
+                        .clients
+                        .get_mut(&request_count)
+                        .expect("Missing client")
+                        .offset_update = ClientOffsetUpdate::Updating;
+                }
             }
 
-            if write_commands.is_empty() {
+            if write_commands.is_empty() && !client_offset_update_request {
                 debug!("Wait for write events to send to readers");
-                self.write_queue_notification.notified().await;
+                self.wr_cmd_propagation_notify.notified().await;
+                continue;
             }
 
             for command in write_commands {
-                stream.write_all(&command.into_resp().serialize()).await?;
+                let out_bytes = &command.into_resp().serialize();
+                stream_reader.get_mut().write_all(out_bytes).await?;
+            }
+
+            // Also check if there is any request for client offset update.
+            if client_offset_update_request {
+                debug!("WAIT#2 - asking client offset for {}", request_count);
+
+                let command = RespValue::Array(vec![
+                    RespValue::BulkString("REPLCONF".into()),
+                    RespValue::BulkString("GETACK".into()),
+                    RespValue::BulkString("*".into()),
+                ]);
+                stream_reader
+                    .get_mut()
+                    .write_all(&command.serialize())
+                    .await
+                    .context("asking-client-offset")?;
+
+                match timeout(
+                    Duration::from_millis(50),
+                    stream_reader.read_resp_value_from_buf_reader(Some(request_count)),
+                )
+                .await
+                {
+                    Ok(response) => {
+                        let response = response?;
+
+                        debug!(
+                            "WAIT#2 - client {} responded: {:?}",
+                            request_count, &response
+                        );
+
+                        match response.map(|elem| CommandParser::parse(elem)) {
+                            Some(Ok(command)) => {
+                                self.execute_only(
+                                    &command,
+                                    Some(request_count),
+                                    stream_reader.byte_count,
+                                )
+                                .await?;
+                            }
+                            _ => {
+                                self.replication_role
+                                    .write()
+                                    .await
+                                    .writer_mut()
+                                    .reset_client_offset_state(request_count);
+                                error!("Client {} sent empty response", request_count);
+                            }
+                        }
+                    }
+                    Err(elapsed) => {
+                        self.replication_role
+                            .write()
+                            .await
+                            .writer_mut()
+                            .reset_client_offset_state(request_count);
+                        error!("Client {} timed out: {}", request_count, elapsed);
+                    }
+                }
             }
         }
     }
