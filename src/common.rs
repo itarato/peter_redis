@@ -38,8 +38,7 @@ pub(crate) struct ClientInfo {
     pub(crate) port: Option<u16>,
     pub(crate) capabilities: HashSet<ClientCapability>,
     last_synced_command_index: i64,
-    // TODO: Make this usize.
-    pub(crate) offset: i64,
+    pub(crate) offset: usize,
     pub(crate) offset_update: ClientOffsetUpdate,
 }
 
@@ -95,7 +94,7 @@ impl WriterRole {
         out
     }
 
-    pub(crate) fn update_client_offset(&mut self, request_count: u64, offset: i64) {
+    pub(crate) fn update_client_offset(&mut self, request_count: u64, offset: usize) {
         let client_info = self
             .clients
             .get_mut(&request_count)

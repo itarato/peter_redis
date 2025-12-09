@@ -546,7 +546,7 @@ impl Engine {
                     } else if args.len() == 2 && args[0].to_lowercase() == "ack" {
                         debug!("WAIT#4 - client offset response arrived");
 
-                        let client_offset = i64::from_str_radix(&args[1], 10)?;
+                        let client_offset = usize::from_str_radix(&args[1], 10)?;
                         self.replication_role
                             .write()
                             .await
@@ -624,7 +624,7 @@ impl Engine {
 
                 debug!("WAIT#1 - Examining {} clients", writer.clients.len());
                 for (client_request_count, client_info) in writer.clients.iter_mut() {
-                    if client_info.offset >= writer_offset as i64 {
+                    if client_info.offset >= writer_offset {
                         up_to_date_replicas.insert(*client_request_count);
                         debug!(
                             "WAIT#1 - found client with sufficient offset ({})",
@@ -888,7 +888,7 @@ impl Engine {
                 .or_insert(ClientInfo::new());
 
             if *offset >= 0 {
-                client_info.offset = *offset;
+                client_info.offset = *offset as usize;
             } else {
                 debug!("Ignoring negative psync offset");
             }
