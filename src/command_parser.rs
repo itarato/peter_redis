@@ -385,6 +385,11 @@ impl CommandParser {
                         return Err("ERR wrong get/set kind for 'config' command".into());
                     }
 
+                    if name.to_lowercase() == "keys" {
+                        let mut str_items = Self::get_strings_exact(items, 2, "keys")?;
+                        return Ok(Command::Keys(str_items.remove(1)));
+                    }
+
                     return Ok(Command::Unknown(name.to_lowercase()));
                 } else {
                     return Ok(Command::Unknown("not-a-string".to_string()));

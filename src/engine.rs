@@ -590,10 +590,12 @@ impl Engine {
                 let mut values = vec![];
 
                 for param in params {
-                    if param.to_lowercase() == "dir" {
+                    let matcher = PatternMatcher::new(&param.to_lowercase());
+
+                    if matcher.is_match("dir") {
                         values.push(RespValue::BulkString("dir".into()));
                         values.push(RespValue::BulkString(self.dir.clone()));
-                    } else if param.to_lowercase() == "dbfilename" {
+                    } else if matcher.is_match("dbfilename") {
                         values.push(RespValue::BulkString("dbfilename".into()));
                         values.push(RespValue::BulkString(self.dbfilename.clone()));
                     } else {
@@ -602,6 +604,16 @@ impl Engine {
                 }
 
                 RespValue::Array(values)
+            }
+
+            Command::Keys(raw_pattern) => {
+                let matches = self.db.read().await.keys(raw_pattern);
+                RespValue::Array(
+                    matches
+                        .into_iter()
+                        .map(|elem| RespValue::BulkString(elem))
+                        .collect::<Vec<_>>(),
+                )
             }
 
             Command::Unknown(msg) => {

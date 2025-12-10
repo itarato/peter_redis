@@ -1,6 +1,8 @@
 use std::collections::{HashMap, VecDeque};
 
-use crate::common::{current_time_ms, CompleteStreamEntryID, KeyValuePair, StreamEntryID};
+use crate::common::{
+    current_time_ms, CompleteStreamEntryID, KeyValuePair, PatternMatcher, StreamEntryID,
+};
 
 struct ValueEntry {
     value: String,
@@ -417,6 +419,19 @@ impl Database {
         value_entry.value = num.to_string();
 
         Ok(num)
+    }
+
+    pub(crate) fn keys(&self, raw_pattern: &str) -> Vec<String> {
+        let mut out = vec![];
+        let matcher = PatternMatcher::new(raw_pattern);
+
+        for key in self.dict.keys() {
+            if matcher.is_match(key) {
+                out.push(key.clone());
+            }
+        }
+
+        out
     }
 
     fn stream_read_single_from_id_exclusive(

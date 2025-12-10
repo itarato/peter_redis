@@ -35,6 +35,7 @@ pub(crate) enum Command {
         u128,  /* timeout ms */
     ),
     GetConfig(Vec<String> /* Arguments */),
+    Keys(String /* Pattern */),
     // ---
     Unknown(String),
 }
@@ -106,6 +107,7 @@ impl Command {
             Command::Unknown(_) => false,
             Command::Wait(_, _) => false,
             Command::GetConfig(_) => false,
+            Command::Keys(_) => false,
         }
     }
 

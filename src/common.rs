@@ -216,13 +216,13 @@ pub(crate) fn new_master_replid() -> String {
     bytes.map(|b| format!("{:x}", b)).join("")
 }
 
-struct PatternMatcher {
+pub(crate) struct PatternMatcher {
     pattern: Regex,
 }
 
 impl PatternMatcher {
     pub(crate) fn new(raw: &str) -> Self {
-        let transformed = format!("^{}$", raw.replace('*', ".*"));
+        let transformed = format!("^{}$", raw.replace('*', ".*").replace('?', "."));
         Self {
             pattern: Regex::new(&transformed).unwrap(),
         }
@@ -254,5 +254,9 @@ mod test {
         assert!(PatternMatcher::new("abc").is_match("abc"));
         assert!(!PatternMatcher::new("abc").is_match(" abc"));
         assert!(!PatternMatcher::new("abc").is_match("abc "));
+
+        assert!(PatternMatcher::new("a?c").is_match("abc"));
+        assert!(!PatternMatcher::new("a?c").is_match("ac"));
+        assert!(!PatternMatcher::new("a?c").is_match("abbc"));
     }
 }
