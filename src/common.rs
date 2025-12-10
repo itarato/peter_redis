@@ -1,6 +1,7 @@
 use crate::commands::Command;
 use rand::rng;
 use rand::RngCore;
+use regex::Regex;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
@@ -213,4 +214,41 @@ pub(crate) fn new_master_replid() -> String {
     let mut bytes: [u8; 20] = [0; 20];
     rnd.fill_bytes(&mut bytes);
     bytes.map(|b| format!("{:x}", b)).join("")
+}
+
+struct PatternMatcher {
+    pattern: Regex,
+}
+
+impl PatternMatcher {
+    pub(crate) fn new(raw: &str) -> Self {
+        let transformed = format!("^{}$", raw.replace('*', ".*"));
+        Self {
+            pattern: Regex::new(&transformed).unwrap(),
+        }
+    }
+
+    pub(crate) fn is_match(&self, other: &str) -> bool {
+        self.pattern.is_match(other)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::common::PatternMatcher;
+
+    #[test]
+    fn test_pattern_matcher() {
+        assert!(PatternMatcher::new("*").is_match("anything"));
+        assert!(PatternMatcher::new("*").is_match(""));
+
+        assert!(PatternMatcher::new("*abc").is_match("abc"));
+        assert!(PatternMatcher::new("*abc").is_match("cccabc"));
+
+        assert!(!PatternMatcher::new("*abc").is_match("abc "));
+        assert!(!PatternMatcher::new("*abc").is_match("ab c"));
+
+        assert!(PatternMatcher::new("*abc*").is_match("abc"));
+        assert!(PatternMatcher::new("*abc*").is_match("cccabcddd"));
+    }
 }
