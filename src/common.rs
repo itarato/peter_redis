@@ -250,5 +250,9 @@ mod test {
 
         assert!(PatternMatcher::new("*abc*").is_match("abc"));
         assert!(PatternMatcher::new("*abc*").is_match("cccabcddd"));
+
+        assert!(PatternMatcher::new("abc").is_match("abc"));
+        assert!(!PatternMatcher::new("abc").is_match(" abc"));
+        assert!(!PatternMatcher::new("abc").is_match("abc "));
     }
 }
