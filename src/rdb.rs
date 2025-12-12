@@ -10,7 +10,7 @@ struct RecordingReader {
 }
 
 impl RecordingReader {
-    fn new(filepath: &String) -> Result<Self, Error> {
+    fn new(filepath: &str) -> Result<Self, Error> {
         let file = File::open(filepath)?;
         let reader = BufReader::new(file);
         Ok(Self {
@@ -268,7 +268,7 @@ impl RdbFile {
 mod test {
     use std::io::Write;
 
-    use crate::rdb::RdbFile;
+    use crate::rdb::{RdbFile, RecordingReader};
 
     #[test]
     fn test_reading_empty() {
@@ -277,6 +277,30 @@ mod test {
 
         let content = rdb.read().unwrap();
         dbg!(content);
+    }
+
+    #[test]
+    fn test_peeking() {
+        create_empty_rdb_file();
+        let mut reader = RecordingReader::new("/tmp/rdb").unwrap();
+
+        let mut buf = [0u8; 2];
+
+        reader.read_exact(&mut buf[0..1]).unwrap();
+        assert_eq!(0x52, buf[0]);
+
+        reader.read_exact_no_memory(&mut buf[0..1]).unwrap();
+        assert_eq!(0x45, buf[0]);
+
+        assert_eq!(vec![0x44], reader.peek(1).unwrap());
+        assert_eq!(vec![0x44], reader.peek(1).unwrap());
+        assert_eq!(vec![0x44, 0x49], reader.peek(2).unwrap());
+
+        reader.read_exact_no_memory(&mut buf[0..1]).unwrap();
+        assert_eq!(0x44, buf[0]);
+
+        reader.read_exact_no_memory(&mut buf[0..2]).unwrap();
+        assert_eq!(vec![0x49, 0x53], buf);
     }
 
     // ---
