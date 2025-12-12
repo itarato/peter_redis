@@ -8,6 +8,7 @@ mod common;
 mod database;
 mod engine;
 mod network;
+mod rdb;
 mod resp;
 mod server;
 
