@@ -822,6 +822,16 @@ impl Engine {
                                     .await?;
                             }
                         }
+                        Command::Ping => {
+                            let payload = RespValue::Array(vec![
+                                RespValue::BulkString("pong".into()),
+                                RespValue::BulkString("".into()),
+                            ]);
+                            stream_reader
+                                .get_mut()
+                                .write_all(&payload.serialize())
+                                .await?;
+                        }
                         other => {
                             warn!("Unexpected command inside subscription: {:?}", other);
                             stream_reader
