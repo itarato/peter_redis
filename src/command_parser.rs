@@ -390,6 +390,31 @@ impl CommandParser {
                         return Ok(Command::Keys(str_items.remove(1)));
                     }
 
+                    if name.to_lowercase() == "subscribe" {
+                        let items_len = items.len();
+                        if items_len < 2 {
+                            return Err(
+                                "ERR wrong number of arguments for 'subscribe' command".into()
+                            );
+                        }
+                        let mut str_items = Self::get_strings_exact(items, items_len, "subscribe")?;
+                        str_items.remove(0); // Word subscribe.
+                        return Ok(Command::Subscribe(str_items));
+                    }
+
+                    if name.to_lowercase() == "unsubscribe" {
+                        let items_len = items.len();
+                        if items_len < 2 {
+                            return Err(
+                                "ERR wrong number of arguments for 'unsubscribe' command".into()
+                            );
+                        }
+                        let mut str_items =
+                            Self::get_strings_exact(items, items_len, "unsubscribe")?;
+                        str_items.remove(0); // Word unsubscribe.
+                        return Ok(Command::Unsubscribe(str_items));
+                    }
+
                     return Ok(Command::Unknown(name.to_lowercase()));
                 } else {
                     return Ok(Command::Unknown("not-a-string".to_string()));

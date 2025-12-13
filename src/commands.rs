@@ -36,6 +36,8 @@ pub(crate) enum Command {
     ),
     GetConfig(Vec<String> /* Arguments */),
     Keys(String /* Pattern */),
+    Subscribe(Vec<String> /* Channels */),
+    Unsubscribe(Vec<String> /* Channels */),
     // ---
     Unknown(String),
 }
@@ -76,6 +78,13 @@ impl Command {
         }
     }
 
+    pub(crate) fn is_subscribe(&self) -> bool {
+        match self {
+            Command::Subscribe(_) => true,
+            _ => false,
+        }
+    }
+
     pub(crate) fn for_replication(&self) -> bool {
         match self {
             Command::Set(_, _, _) => true,
@@ -108,6 +117,8 @@ impl Command {
             Command::Wait(_, _) => false,
             Command::GetConfig(_) => false,
             Command::Keys(_) => false,
+            Command::Subscribe(_) => false,
+            Command::Unsubscribe(_) => false,
         }
     }
 

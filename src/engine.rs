@@ -273,6 +273,10 @@ impl Engine {
         } else if command.is_psync() {
             self.handle_replica_connection(stream_reader, request_count, command)
                 .await?;
+        } else if command.is_subscribe() {
+            debug!("Subscribe by req {}", request_count);
+            self.subscribe(stream_reader, command, request_count)
+                .await?;
         } else {
             self.execute_and_reply(command, Some(request_count), stream_reader)
                 .await?;
@@ -653,6 +657,12 @@ impl Engine {
                 )
             }
 
+            Command::Subscribe(_) => unreachable!("Handled above"),
+
+            Command::Unsubscribe(_) => {
+                RespValue::SimpleError("ERR Cannot unsubscribe outside of a subscription".into())
+            }
+
             Command::Unknown(msg) => {
                 RespValue::SimpleError(format!("Unrecognized command: {}", msg))
             }
@@ -745,6 +755,104 @@ impl Engine {
                 break Ok(up_to_date_replicas.len() as i64);
             }
         }
+    }
+
+    async fn subscribe(
+        &self,
+        stream_reader: &mut StreamReader<'_>,
+        command: &Command,
+        request_count: u64,
+    ) -> Result<(), Error> {
+        let input_channels = match command {
+            Command::Subscribe(channels) => channels,
+            _ => panic!(),
+        };
+
+        let mut channels = HashSet::new();
+
+        for channel in input_channels {
+            channels.insert(channel.clone());
+
+            let payload = RespValue::Array(vec![
+                RespValue::BulkString("subscribe".into()),
+                RespValue::BulkString(channel.clone()),
+                RespValue::Integer(channels.len() as i64),
+            ]);
+            stream_reader
+                .get_mut()
+                .write_all(&payload.serialize())
+                .await?;
+        }
+
+        loop {
+            let incoming = stream_reader
+                .read_resp_value_from_buf_reader(Some(request_count))
+                .await?;
+
+            match incoming {
+                Some(resp_value) => match CommandParser::parse(resp_value) {
+                    Ok(command) => match command {
+                        Command::Subscribe(more_channels) => {
+                            for channel in more_channels {
+                                channels.insert(channel.clone());
+
+                                let payload = RespValue::Array(vec![
+                                    RespValue::BulkString("subscribe".into()),
+                                    RespValue::BulkString(channel),
+                                    RespValue::Integer(channels.len() as i64),
+                                ]);
+                                stream_reader
+                                    .get_mut()
+                                    .write_all(&payload.serialize())
+                                    .await?;
+                            }
+                        }
+                        Command::Unsubscribe(channels_to_remove) => {
+                            for channel in channels_to_remove {
+                                channels.remove(&channel);
+
+                                let payload = RespValue::Array(vec![
+                                    RespValue::BulkString("unsubscribe".into()),
+                                    RespValue::BulkString(channel),
+                                    RespValue::Integer(channels.len() as i64),
+                                ]);
+                                stream_reader
+                                    .get_mut()
+                                    .write_all(&payload.serialize())
+                                    .await?;
+                            }
+                        }
+                        other => {
+                            error!("Unexpected command inside subscription: {:?}", other);
+                            stream_reader
+                                .get_mut()
+                                .write_all(
+                                    &RespValue::SimpleError(
+                                        "ERR invalid command in subscribe".into(),
+                                    )
+                                    .serialize(),
+                                )
+                                .await?;
+                        }
+                    },
+                    Err(err) => {
+                        stream_reader
+                            .get_mut()
+                            .write_all(&RespValue::SimpleError(err).serialize())
+                            .await?;
+                    }
+                },
+                None => {
+                    debug!(
+                        "Subscription ended its TCP stream for req {}",
+                        request_count
+                    );
+                    break;
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn stream_to_resp(stream_entry: StreamEntry) -> RespValue {
