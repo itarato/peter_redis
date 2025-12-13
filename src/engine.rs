@@ -95,6 +95,12 @@ impl Engine {
             debug!("Importing to DB #{}", db_index);
 
             for (key, (expiry_ms, value)) in data {
+                let has_expired = expiry_ms.map(|ms| ms < current_time_ms()).unwrap_or(false);
+                if has_expired {
+                    debug!("Expired value skipped");
+                    continue;
+                }
+
                 debug!("Importing key {}", key);
 
                 match value {
@@ -314,12 +320,11 @@ impl Engine {
             Command::Echo(arg) => RespValue::BulkString(arg.clone()),
 
             Command::Set(key, value, expiry) => {
-                match self
-                    .db
-                    .write()
-                    .await
-                    .set(key.clone(), value.clone(), expiry.clone())
-                {
+                match self.db.write().await.set(
+                    key.clone(),
+                    value.clone(),
+                    expiry.clone().map(|offset| offset + current_time_ms()),
+                ) {
                     Ok(_) => RespValue::SimpleString("OK".into()),
                     Err(err) => RespValue::SimpleError(err),
                 }
