@@ -1,7 +1,10 @@
 use std::{
+    collections::HashMap,
     fs::File,
     io::{BufReader, Read},
 };
+
+use crate::common::Error;
 
 struct RecordingReader {
     reader: BufReader<File>,
@@ -32,7 +35,6 @@ impl RecordingReader {
 
         for i in 0..req_len.min(peeked_len) {
             let byte = self.peeked.remove(0);
-            self.memory.push(byte);
             buf[i] = byte;
         }
 
@@ -50,7 +52,7 @@ impl RecordingReader {
         Ok(())
     }
 
-    fn peek(&mut self, n: usize) -> Result<Vec<u8>, Error> {
+    fn peekn(&mut self, n: usize) -> Result<Vec<u8>, Error> {
         if self.peeked.len() < n {
             let missing_len = n - self.peeked.len();
             let mut buf = Vec::with_capacity(missing_len);
@@ -61,9 +63,17 @@ impl RecordingReader {
 
         Ok(self.peeked[0..n].to_vec())
     }
-}
 
-use crate::common::Error;
+    fn peek(&mut self) -> Result<u8, Error> {
+        self.peekn(1).map(|items| items[0])
+    }
+
+    fn consume(&mut self, n: usize) -> Result<(), std::io::Error> {
+        let mut buf = Vec::with_capacity(n);
+        buf.resize(n, 0);
+        self.read_exact(&mut buf)
+    }
+}
 
 #[derive(Debug)]
 pub(crate) enum VariableLenString {
@@ -71,18 +81,31 @@ pub(crate) enum VariableLenString {
     I8(i8),
     I16(i16),
     I32(i32),
-    NotALength(u8),
 }
 
 pub(crate) type AuxKeyValuePair = (String, VariableLenString);
+
+#[derive(Debug)]
+pub(crate) enum Value {
+    Str(String),
+    List(Vec<String>),
+}
 
 #[derive(Debug, Default)]
 pub(crate) struct RdbContent {
     version: Option<u16>,
     aux_fields: Vec<AuxKeyValuePair>,
-    db_selector: Option<u8>,
+    db_selector: Option<usize>,
     hash_table_size: Option<usize>,
     expiry_hash_table_size: Option<usize>,
+    data: HashMap<usize, HashMap<String, (Option<u64> /* Expiry */, Value)>>,
+}
+
+impl RdbContent {
+    fn current_db_mut(&mut self) -> &mut HashMap<String, (Option<u64>, Value)> {
+        let i = self.db_selector.unwrap();
+        self.data.get_mut(&i).unwrap()
+    }
 }
 
 pub(crate) struct RdbFile {
@@ -110,30 +133,46 @@ impl RdbFile {
         debug!("Version number: {}", version_number_str);
         content.version = Some(u16::from_str_radix(&version_number_str, 10)?);
 
-        reader.read_exact(&mut general_buffer[0..1])?;
-        let header = general_buffer[0];
-
-        Self::read_section(header, &mut reader, &mut content)?;
-
-        Ok(content)
-    }
-
-    fn read_section(
-        header: u8,
-        reader: &mut RecordingReader,
-        content: &mut RdbContent,
-    ) -> Result<(), Error> {
-        match header {
-            0xFF => Self::read_eof(reader)?,
-            0xFE => Self::read_db_section(reader, content)?,
-            0xFD => unimplemented!("EXPIRETIME"),
-            0xFC => unimplemented!("EXPIRETIMEMS"),
-            0xFB => Self::read_resize_db(reader, content)?,
-            0xFA => Self::read_aux_section(reader, content)?,
-            _ => return Err("Unknown section header".into()),
+        loop {
+            match reader.peek()? {
+                0xFF => {
+                    reader.consume(1)?; // Header.
+                    Self::read_eof(&mut reader)?;
+                    break;
+                }
+                0xFE => {
+                    reader.consume(1)?; // Header.
+                    Self::read_db_section(&mut reader, &mut content)?;
+                }
+                0xFB => {
+                    reader.consume(1)?; // Header.
+                    Self::read_resize_db(&mut reader, &mut content)?;
+                }
+                0xFA => {
+                    reader.consume(1)?; // Header.
+                    Self::read_aux_section(&mut reader, &mut content)?;
+                }
+                header => {
+                    let expiry_ms = match header {
+                        0xFD => {
+                            reader.consume(1)?; // Header;
+                            reader.read_exact(&mut general_buffer[0..4])?;
+                            Some(u32::from_le_bytes(general_buffer[0..4].try_into()?) as u64 * 1000)
+                        }
+                        0xFC => {
+                            reader.consume(1)?; // Header;
+                            reader.read_exact(&mut general_buffer[0..8])?;
+                            Some(u64::from_le_bytes(general_buffer[0..8].try_into()?))
+                        }
+                        _ => None,
+                    };
+                    let _ = Self::read_key_value(&mut reader, &mut content, expiry_ms)?;
+                    unimplemented!()
+                }
+            }
         }
 
-        Ok(())
+        Ok(content)
     }
 
     fn read_db_section(
@@ -141,9 +180,51 @@ impl RdbFile {
         content: &mut RdbContent,
     ) -> Result<(), Error> {
         match Self::read_variable_len_str(reader)? {
-            VariableLenString::I8(v) => content.db_selector = Some(v as u8),
+            VariableLenString::I8(v) => {
+                let db_idx = v as usize;
+                assert!(content.data.contains_key(&db_idx));
+                content.data.insert(db_idx, HashMap::new());
+                content.db_selector = Some(db_idx);
+            }
             _ => unimplemented!("Unsupported db selector"),
         }
+        Ok(())
+    }
+
+    fn read_key_value(
+        reader: &mut RecordingReader,
+        content: &mut RdbContent,
+        expiry: Option<u64>,
+    ) -> Result<(), Error> {
+        let mut buf = Vec::with_capacity(1);
+        buf.resize(1, 0u8);
+        reader.read_exact(&mut buf[0..1])?;
+        let value_type = buf[0];
+
+        let key = match Self::read_variable_len_str(reader)? {
+            VariableLenString::Str(str) => str,
+            _ => panic!("Invalid key type for key-value pairs"),
+        };
+
+        let value = match value_type {
+            0 => match Self::read_variable_len_str(reader)? {
+                VariableLenString::Str(s) => Value::Str(s),
+                _ => panic!("Unexpected bytes for string value"),
+            },
+            1 => unimplemented!("List Encoding"),
+            2 => unimplemented!("Set Encoding"),
+            3 => unimplemented!("Sorted Set Encoding"),
+            4 => unimplemented!("Hash Encoding"),
+            9 => unimplemented!("Zipmap Encoding"),
+            10 => unimplemented!("Ziplist Encoding"),
+            11 => unimplemented!("Intset Encoding"),
+            12 => unimplemented!("Sorted Set in Ziplist Encoding"),
+            13 => unimplemented!("Hashmap in Ziplist Encoding (Introduced in RDB version 4)"),
+            14 => unimplemented!("List in Quicklist encoding (Introduced in RDB version 7)"),
+            other => panic!("Invalid value type {}", other),
+        };
+
+        content.current_db_mut().insert(key, (expiry, value));
         Ok(())
     }
 
@@ -165,25 +246,25 @@ impl RdbFile {
         Ok(())
     }
 
+    fn is_header(byte: u8) -> bool {
+        byte >= 0xfa
+    }
+
     fn read_aux_section(
         reader: &mut RecordingReader,
         content: &mut RdbContent,
     ) -> Result<(), Error> {
         loop {
-            let key = Self::read_variable_len_str(reader)?;
-            if let VariableLenString::NotALength(next_header) = key {
-                return Self::read_section(next_header, reader, content);
+            if Self::is_header(reader.peek()?) {
+                return Ok(());
             }
 
+            let key = Self::read_variable_len_str(reader)?;
             let VariableLenString::Str(key) = key else {
                 panic!("Expected string for aux key");
             };
 
             let value = Self::read_variable_len_str(reader)?;
-            if let VariableLenString::NotALength(byte) = value {
-                panic!("Expected Aux value for key. Found: {:b}", byte);
-            }
-
             content.aux_fields.push((key, value));
         }
     }
@@ -233,7 +314,7 @@ impl RdbFile {
                     Ok(VariableLenString::I32(i32::from_le_bytes(buf.try_into()?)))
                 }
                 3 => unimplemented!("LZF encoded strings are not yet implemented"),
-                _ => Ok(VariableLenString::NotALength(buf[0])),
+                suffix => panic!("Unexpected last 6 bit for 0b11 lenght type: {:b}", suffix),
             },
             _ => panic!("Unexpected"),
         }
@@ -259,7 +340,7 @@ impl RdbFile {
         if expected_checksum == actual_checksum {
             Ok(())
         } else {
-            Err("Checksum error".into())
+            Err(format!("Checksum error for {} bytes", &reader.memory.len()).into())
         }
     }
 }
@@ -292,9 +373,9 @@ mod test {
         reader.read_exact_no_memory(&mut buf[0..1]).unwrap();
         assert_eq!(0x45, buf[0]);
 
-        assert_eq!(vec![0x44], reader.peek(1).unwrap());
-        assert_eq!(vec![0x44], reader.peek(1).unwrap());
-        assert_eq!(vec![0x44, 0x49], reader.peek(2).unwrap());
+        assert_eq!(0x44, reader.peek().unwrap());
+        assert_eq!(0x44, reader.peek().unwrap());
+        assert_eq!(vec![0x44, 0x49], reader.peekn(2).unwrap());
 
         reader.read_exact_no_memory(&mut buf[0..1]).unwrap();
         assert_eq!(0x44, buf[0]);
