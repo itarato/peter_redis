@@ -122,6 +122,42 @@ impl Command {
         }
     }
 
+    pub(crate) fn short_name(&self) -> &str {
+        match self {
+            Command::Set(_, _, _) => "set",
+            Command::Rpush(_, _) => "rpush",
+            Command::Lpush(_, _) => "lpush",
+            Command::Lpop(_) => "lpop",
+            Command::Rpop(_) => "rpop",
+            Command::Lpopn(_, _) => "lpopn",
+            Command::Rpopn(_, _) => "rpopn",
+            Command::Xadd(_, _, _) => "xadd",
+            Command::Incr(_) => "incr",
+            Command::Blpop(_, _) => "blpop",
+            Command::Brpop(_, _) => "brpop",
+            Command::Ping => "ping",
+            Command::Echo(_) => "echo",
+            Command::Get(_) => "get",
+            Command::Lrange(_, _, _) => "lrange",
+            Command::Llen(_) => "llen",
+            Command::Type(_) => "type",
+            Command::Xrange(_, _, _, _) => "xrange",
+            Command::Xread(_, _, _) => "xread",
+            Command::Multi => "multi",
+            Command::Exec => "exec",
+            Command::Discard => "discard",
+            Command::Info(_) => "info",
+            Command::Replconf(_) => "replconf",
+            Command::Psync(_, _) => "psync",
+            Command::Unknown(_) => "unknown",
+            Command::Wait(_, _) => "wait",
+            Command::GetConfig(_) => "getconfig",
+            Command::Keys(_) => "keys",
+            Command::Subscribe(_) => "subscribe",
+            Command::Unsubscribe(_) => "unsubscribe",
+        }
+    }
+
     pub(crate) fn into_resp(&self) -> RespValue {
         match self {
             Command::Set(key, value, expiry) => {

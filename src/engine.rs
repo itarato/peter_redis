@@ -823,12 +823,12 @@ impl Engine {
                             }
                         }
                         other => {
-                            error!("Unexpected command inside subscription: {:?}", other);
+                            warn!("Unexpected command inside subscription: {:?}", other);
                             stream_reader
                                 .get_mut()
                                 .write_all(
                                     &RespValue::SimpleError(
-                                        "ERR invalid command in subscribe".into(),
+                                        format!("ERR Can't execute '{}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context ", other.short_name().to_lowercase()),
                                     )
                                     .serialize(),
                                 )
