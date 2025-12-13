@@ -73,6 +73,10 @@ impl Database {
         }
     }
 
+    pub(crate) fn clear(&mut self) {
+        self.dict.clear();
+    }
+
     pub(crate) fn set(
         &mut self,
         key: String,

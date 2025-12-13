@@ -18,6 +18,7 @@ use crate::{
     common::*,
     database::{Database, StreamEntry},
     network::StreamReader,
+    rdb::{RdbFile, RdbValue},
     resp::RespValue,
 };
 
@@ -67,11 +68,42 @@ impl Engine {
     }
 
     pub(crate) async fn init(&self, server_port: u16) -> Result<(), Error> {
+        self.reload_from_snapshot().await?;
+
         if self.replication_role.read().await.is_reader() {
             self.handle_replication_connection(server_port).await
         } else {
             Ok(())
         }
+    }
+
+    async fn reload_from_snapshot(&self) -> Result<(), Error> {
+        let path = std::path::PathBuf::from(&self.dir).join(&self.dbfilename);
+        if !path.exists() {
+            info!("No snapshot file found for sync");
+            return Ok(());
+        }
+
+        let content = RdbFile::new(path).read()?;
+
+        let mut db = self.db.write().await;
+        db.clear();
+        debug!("Import starts");
+
+        for (db_index, data) in content.data {
+            assert!(db_index == 0); // For now.
+            debug!("Importing to DB #{}", db_index);
+
+            for (key, (expiry_ms, value)) in data {
+                debug!("Importing key {}", key);
+
+                match value {
+                    RdbValue::Str(str) => db.set(key, str, expiry_ms)?,
+                }
+            }
+        }
+
+        Ok(())
     }
 
     async fn handle_replication_connection(&self, server_port: u16) -> Result<(), Error> {

@@ -2,9 +2,16 @@ use std::{
     collections::HashMap,
     fs::File,
     io::{BufReader, Read},
+    path::{Path, PathBuf},
 };
 
 use crate::common::Error;
+
+#[derive(Debug)]
+enum Length {
+    Number(usize /* St ring length */),
+    String(usize /* Bit length */),
+}
 
 struct RecordingReader {
     reader: BufReader<File>,
@@ -13,7 +20,7 @@ struct RecordingReader {
 }
 
 impl RecordingReader {
-    fn new(filepath: &str) -> Result<Self, Error> {
+    fn new<P: AsRef<Path>>(filepath: P) -> Result<Self, Error> {
         let file = File::open(filepath)?;
         let reader = BufReader::new(file);
         Ok(Self {
@@ -75,45 +82,36 @@ impl RecordingReader {
     }
 }
 
-#[derive(Debug)]
-pub(crate) enum VariableLenString {
-    Str(String),
-    I8(i8),
-    I16(i16),
-    I32(i32),
-}
-
-pub(crate) type AuxKeyValuePair = (String, VariableLenString);
+pub(crate) type AuxKeyValuePair = (String, String);
 
 #[derive(Debug)]
-pub(crate) enum Value {
+pub(crate) enum RdbValue {
     Str(String),
-    List(Vec<String>),
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct RdbContent {
-    version: Option<u16>,
-    aux_fields: Vec<AuxKeyValuePair>,
-    db_selector: Option<usize>,
-    hash_table_size: Option<usize>,
-    expiry_hash_table_size: Option<usize>,
-    data: HashMap<usize, HashMap<String, (Option<u64> /* Expiry */, Value)>>,
+    pub(crate) version: Option<u16>,
+    pub(crate) aux_fields: Vec<AuxKeyValuePair>,
+    pub(crate) db_selector: Option<usize>,
+    pub(crate) hash_table_size: Option<usize>,
+    pub(crate) expiry_hash_table_size: Option<usize>,
+    pub(crate) data: HashMap<usize, HashMap<String, (Option<u128> /* Expiry */, RdbValue)>>,
 }
 
 impl RdbContent {
-    fn current_db_mut(&mut self) -> &mut HashMap<String, (Option<u64>, Value)> {
+    fn current_db_mut(&mut self) -> &mut HashMap<String, (Option<u128>, RdbValue)> {
         let i = self.db_selector.unwrap();
         self.data.get_mut(&i).unwrap()
     }
 }
 
 pub(crate) struct RdbFile {
-    filepath: String,
+    filepath: PathBuf,
 }
 
 impl RdbFile {
-    pub(crate) fn new(filepath: String) -> Self {
+    pub(crate) fn new(filepath: PathBuf) -> Self {
         Self { filepath }
     }
 
@@ -157,17 +155,18 @@ impl RdbFile {
                         0xFD => {
                             reader.consume(1)?; // Header;
                             reader.read_exact(&mut general_buffer[0..4])?;
-                            Some(u32::from_le_bytes(general_buffer[0..4].try_into()?) as u64 * 1000)
+                            Some(
+                                u32::from_le_bytes(general_buffer[0..4].try_into()?) as u128 * 1000,
+                            )
                         }
                         0xFC => {
                             reader.consume(1)?; // Header;
                             reader.read_exact(&mut general_buffer[0..8])?;
-                            Some(u64::from_le_bytes(general_buffer[0..8].try_into()?))
+                            Some(u64::from_le_bytes(general_buffer[0..8].try_into()?) as u128)
                         }
                         _ => None,
                     };
-                    let _ = Self::read_key_value(&mut reader, &mut content, expiry_ms)?;
-                    unimplemented!()
+                    Self::read_key_value(&mut reader, &mut content, expiry_ms)?;
                 }
             }
         }
@@ -179,14 +178,13 @@ impl RdbFile {
         reader: &mut RecordingReader,
         content: &mut RdbContent,
     ) -> Result<(), Error> {
-        match Self::read_variable_len_str(reader)? {
-            VariableLenString::I8(v) => {
+        match Self::read_length(reader)? {
+            Length::Number(v) => {
                 let db_idx = v as usize;
-                assert!(content.data.contains_key(&db_idx));
                 content.data.insert(db_idx, HashMap::new());
                 content.db_selector = Some(db_idx);
             }
-            _ => unimplemented!("Unsupported db selector"),
+            other => unimplemented!("Unsupported db selector: {:?}", other),
         }
         Ok(())
     }
@@ -194,23 +192,17 @@ impl RdbFile {
     fn read_key_value(
         reader: &mut RecordingReader,
         content: &mut RdbContent,
-        expiry: Option<u64>,
+        expiry: Option<u128>,
     ) -> Result<(), Error> {
         let mut buf = Vec::with_capacity(1);
         buf.resize(1, 0u8);
         reader.read_exact(&mut buf[0..1])?;
         let value_type = buf[0];
 
-        let key = match Self::read_variable_len_str(reader)? {
-            VariableLenString::Str(str) => str,
-            _ => panic!("Invalid key type for key-value pairs"),
-        };
+        let key = Self::read_variable_len_str(reader)?;
 
         let value = match value_type {
-            0 => match Self::read_variable_len_str(reader)? {
-                VariableLenString::Str(s) => Value::Str(s),
-                _ => panic!("Unexpected bytes for string value"),
-            },
+            0 => RdbValue::Str(Self::read_variable_len_str(reader)?),
             1 => unimplemented!("List Encoding"),
             2 => unimplemented!("Set Encoding"),
             3 => unimplemented!("Sorted Set Encoding"),
@@ -229,18 +221,14 @@ impl RdbFile {
     }
 
     fn read_resize_db(reader: &mut RecordingReader, content: &mut RdbContent) -> Result<(), Error> {
-        match Self::read_variable_len_str(reader)? {
-            VariableLenString::I8(v) => content.hash_table_size = Some(v as usize),
-            VariableLenString::I16(v) => content.hash_table_size = Some(v as usize),
-            VariableLenString::I32(v) => content.hash_table_size = Some(v as usize),
-            _ => panic!("Unexpected type for hash table size"),
+        match Self::read_length(reader)? {
+            Length::Number(v) => content.hash_table_size = Some(v as usize),
+            other => panic!("Unexpected type for hash table size: {:?}", other),
         }
 
-        match Self::read_variable_len_str(reader)? {
-            VariableLenString::I8(v) => content.expiry_hash_table_size = Some(v as usize),
-            VariableLenString::I16(v) => content.expiry_hash_table_size = Some(v as usize),
-            VariableLenString::I32(v) => content.expiry_hash_table_size = Some(v as usize),
-            _ => panic!("Unexpected type for expiry hash table size"),
+        match Self::read_length(reader)? {
+            Length::Number(v) => content.expiry_hash_table_size = Some(v as usize),
+            other => panic!("Unexpected type for hash table size: {:?}", other),
         }
 
         Ok(())
@@ -260,63 +248,66 @@ impl RdbFile {
             }
 
             let key = Self::read_variable_len_str(reader)?;
-            let VariableLenString::Str(key) = key else {
-                panic!("Expected string for aux key");
-            };
-
             let value = Self::read_variable_len_str(reader)?;
+
             content.aux_fields.push((key, value));
         }
     }
 
-    fn read_variable_len_str(reader: &mut RecordingReader) -> Result<VariableLenString, Error> {
+    fn read_length(reader: &mut RecordingReader) -> Result<Length, Error> {
         let mut buf: [u8; 8] = [0; 8];
         reader.read_exact(&mut buf[0..1])?;
 
         let lead_bits = buf[0] >> 6;
         match lead_bits {
-            0b00 => {
-                let len = (buf[0] & 0b0011_1111) as usize;
-                Ok(VariableLenString::Str(Self::read_string_of_len(
-                    reader, len,
-                )?))
-            }
+            0b00 => Ok(Length::Number((buf[0] & 0b0011_1111) as usize)),
             0b01 => {
                 let lhs = ((buf[0] & 0b0011_1111) as usize) << 8;
                 reader.read_exact(&mut buf[0..1])?;
                 let rhs = buf[0] as usize;
-                let len = lhs + rhs;
-                Ok(VariableLenString::Str(Self::read_string_of_len(
-                    reader, len,
-                )?))
+                Ok(Length::Number(lhs + rhs))
             }
             0b10 => {
                 reader.read_exact(&mut buf[0..4])?;
-                let len = (u32::from_le_bytes(buf[0..3].try_into()?)) as usize;
-                Ok(VariableLenString::Str(Self::read_string_of_len(
-                    reader, len,
-                )?))
+                Ok(Length::Number(
+                    u32::from_le_bytes(buf[0..3].try_into()?) as usize
+                ))
             }
             0b11 => match buf[0] & 0b0011_1111 {
-                0 => {
-                    let mut buf = [0u8; 1];
-                    reader.read_exact(&mut buf)?;
-                    Ok(VariableLenString::I8(i8::from_le_bytes(buf.try_into()?)))
-                }
-                1 => {
-                    let mut buf = [0u8; 2];
-                    reader.read_exact(&mut buf)?;
-                    Ok(VariableLenString::I16(i16::from_le_bytes(buf.try_into()?)))
-                }
-                2 => {
-                    let mut buf = [0u8; 4];
-                    reader.read_exact(&mut buf)?;
-                    Ok(VariableLenString::I32(i32::from_le_bytes(buf.try_into()?)))
-                }
+                0 => Ok(Length::String(1)),
+                1 => Ok(Length::String(2)),
+                2 => Ok(Length::String(4)),
                 3 => unimplemented!("LZF encoded strings are not yet implemented"),
                 suffix => panic!("Unexpected last 6 bit for 0b11 lenght type: {:b}", suffix),
             },
             _ => panic!("Unexpected"),
+        }
+    }
+
+    fn read_variable_len_str(reader: &mut RecordingReader) -> Result<String, Error> {
+        match Self::read_length(reader)? {
+            Length::Number(len) => Self::read_string_of_len(reader, len),
+            Length::String(bitsize) => {
+                let mut buf = [0u8; 4];
+                match bitsize {
+                    1 => {
+                        reader.read_exact(&mut buf[0..1])?;
+                        let number = i8::from_le_bytes(buf[0..1].try_into()?);
+                        Ok(number.to_string())
+                    }
+                    2 => {
+                        reader.read_exact(&mut buf[0..2])?;
+                        let number = i16::from_le_bytes(buf[0..2].try_into()?);
+                        Ok(number.to_string())
+                    }
+                    4 => {
+                        reader.read_exact(&mut buf[0..4])?;
+                        let number = i32::from_le_bytes(buf[0..4].try_into()?);
+                        Ok(number.to_string())
+                    }
+                    other => panic!("Unexpected string number bit length: {}", other),
+                }
+            }
         }
     }
 
