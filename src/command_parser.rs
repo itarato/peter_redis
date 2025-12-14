@@ -415,6 +415,14 @@ impl CommandParser {
                         return Ok(Command::Unsubscribe(str_items));
                     }
 
+                    if name.to_lowercase() == "publish" {
+                        let mut str_items = Self::get_strings_exact(items, 3, "publish")?;
+                        str_items.remove(0); // Word publish.
+                        let channel = str_items.remove(0);
+                        let message = str_items.remove(0);
+                        return Ok(Command::Publish(channel, message));
+                    }
+
                     return Ok(Command::Unknown(name.to_lowercase()));
                 } else {
                     return Ok(Command::Unknown("not-a-string".to_string()));

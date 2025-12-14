@@ -38,6 +38,7 @@ pub(crate) enum Command {
     Keys(String /* Pattern */),
     Subscribe(Vec<String> /* Channels */),
     Unsubscribe(Vec<String> /* Channels */),
+    Publish(String /* Channel */, String /* Message */),
     // ---
     Unknown(String),
 }
@@ -119,6 +120,7 @@ impl Command {
             Command::Keys(_) => false,
             Command::Subscribe(_) => false,
             Command::Unsubscribe(_) => false,
+            Command::Publish(_, _) => false,
         }
     }
 
@@ -155,6 +157,7 @@ impl Command {
             Command::Keys(_) => "keys",
             Command::Subscribe(_) => "subscribe",
             Command::Unsubscribe(_) => "unsubscribe",
+            Command::Publish(_, _) => "publish",
         }
     }
 

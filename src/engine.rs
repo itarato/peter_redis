@@ -38,6 +38,8 @@ pub(crate) struct Engine {
     stream_notify: Arc<Notify>,
     wr_cmd_propagation_notify: Notify,
     wr_read_client_offset_notify: Arc<Notify>,
+    subscriptions: RwLock<HashMap<u64, HashMap<String, VecDeque<String>>>>,
+    subscription_notify: Notify,
 }
 
 impl Engine {
@@ -64,6 +66,8 @@ impl Engine {
             replication_role: RwLock::new(replication_role),
             wr_cmd_propagation_notify: Notify::new(),
             wr_read_client_offset_notify: Arc::new(Notify::new()),
+            subscriptions: RwLock::new(HashMap::new()),
+            subscription_notify: Notify::new(),
         }
     }
 
@@ -663,6 +667,13 @@ impl Engine {
                 RespValue::SimpleError("ERR Cannot unsubscribe outside of a subscription".into())
             }
 
+            Command::Publish(channel, message) => {
+                let client_count = self
+                    .subscription_add_message(channel, message.clone())
+                    .await;
+                RespValue::Integer(client_count as i64)
+            }
+
             Command::Unknown(msg) => {
                 RespValue::SimpleError(format!("Unrecognized command: {}", msg))
             }
@@ -768,15 +779,15 @@ impl Engine {
             _ => panic!(),
         };
 
-        let mut channels = HashSet::new();
-
         for channel in input_channels {
-            channels.insert(channel.clone());
+            let client_subs_len = self
+                .subscribe_client_to_channel(request_count, channel.clone())
+                .await;
 
             let payload = RespValue::Array(vec![
                 RespValue::BulkString("subscribe".into()),
                 RespValue::BulkString(channel.clone()),
-                RespValue::Integer(channels.len() as i64),
+                RespValue::Integer(client_subs_len as i64),
             ]);
             stream_reader
                 .get_mut()
@@ -785,84 +796,17 @@ impl Engine {
         }
 
         loop {
-            let incoming = stream_reader
-                .read_resp_value_from_buf_reader(Some(request_count))
-                .await?;
-
-            match incoming {
-                Some(resp_value) => match CommandParser::parse(resp_value) {
-                    Ok(command) => match command {
-                        Command::Subscribe(more_channels) => {
-                            for channel in more_channels {
-                                channels.insert(channel.clone());
-
-                                let payload = RespValue::Array(vec![
-                                    RespValue::BulkString("subscribe".into()),
-                                    RespValue::BulkString(channel),
-                                    RespValue::Integer(channels.len() as i64),
-                                ]);
-                                stream_reader
-                                    .get_mut()
-                                    .write_all(&payload.serialize())
-                                    .await?;
-                            }
-                        }
-                        Command::Unsubscribe(channels_to_remove) => {
-                            for channel in channels_to_remove {
-                                channels.remove(&channel);
-
-                                let payload = RespValue::Array(vec![
-                                    RespValue::BulkString("unsubscribe".into()),
-                                    RespValue::BulkString(channel),
-                                    RespValue::Integer(channels.len() as i64),
-                                ]);
-                                stream_reader
-                                    .get_mut()
-                                    .write_all(&payload.serialize())
-                                    .await?;
-                            }
-                        }
-                        Command::Ping => {
-                            let payload = RespValue::Array(vec![
-                                RespValue::BulkString("pong".into()),
-                                RespValue::BulkString("".into()),
-                            ]);
-                            stream_reader
-                                .get_mut()
-                                .write_all(&payload.serialize())
-                                .await?;
-                        }
-                        other => {
-                            warn!("Unexpected command inside subscription: {:?}", other);
-                            stream_reader
-                                .get_mut()
-                                .write_all(
-                                    &RespValue::SimpleError(
-                                        format!("ERR Can't execute '{}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context ", other.short_name().to_lowercase()),
-                                    )
-                                    .serialize(),
-                                )
-                                .await?;
-                        }
-                    },
-                    Err(err) => {
-                        stream_reader
-                            .get_mut()
-                            .write_all(&RespValue::SimpleError(err).serialize())
-                            .await?;
+            tokio::select! {
+                should_finish = self.subscription_handle_incoming_commands(stream_reader, request_count) => {
+                    if should_finish? {
+                        return Ok(());
                     }
-                },
-                None => {
-                    debug!(
-                        "Subscription ended its TCP stream for req {}",
-                        request_count
-                    );
-                    break;
+                }
+                _ = self.subscription_notify.notified() => {
+                    self.subscription_handle_publishing(stream_reader, request_count).await?;
                 }
             }
         }
-
-        Ok(())
     }
 
     fn stream_to_resp(stream_entry: StreamEntry) -> RespValue {
@@ -1193,5 +1137,165 @@ impl Engine {
                 }
             }
         }
+    }
+
+    async fn subscribe_client_to_channel(&self, request_count: u64, channel: String) -> usize {
+        let mut subs = self.subscriptions.write().await;
+        let client_subs = subs.entry(request_count).or_default();
+        client_subs.entry(channel).or_default();
+
+        client_subs.len()
+    }
+
+    async fn unsubscribe_client_from_channel(&self, request_count: u64, channel: &String) -> usize {
+        let mut subs = self.subscriptions.write().await;
+        let client_subs = subs.entry(request_count).or_default();
+        client_subs.remove(channel);
+
+        client_subs.len()
+    }
+
+    async fn subscription_add_message(&self, channel: &String, message: String) -> usize {
+        let mut count = 0;
+        let mut subs = self.subscriptions.write().await;
+
+        for (_, client_subs) in subs.iter_mut() {
+            if !client_subs.contains_key(channel) {
+                continue;
+            }
+
+            client_subs
+                .get_mut(channel)
+                .map(|messages| messages.push_back(message.clone()));
+
+            count += 1;
+        }
+
+        self.subscription_notify.notify_waiters();
+
+        count
+    }
+
+    async fn subscription_handle_incoming_commands(
+        &self,
+        stream_reader: &mut StreamReader<'_>,
+        request_count: u64,
+    ) -> Result<bool /* should the sub finish */, Error> {
+        let incoming = stream_reader
+            .read_resp_value_from_buf_reader(Some(request_count))
+            .await?;
+
+        match incoming {
+            Some(resp_value) => match CommandParser::parse(resp_value) {
+                Ok(command) => match command {
+                    Command::Subscribe(more_channels) => {
+                        for channel in more_channels {
+                            let client_subs_len = self
+                                .subscribe_client_to_channel(request_count, channel.clone())
+                                .await;
+
+                            let payload = RespValue::Array(vec![
+                                RespValue::BulkString("subscribe".into()),
+                                RespValue::BulkString(channel),
+                                RespValue::Integer(client_subs_len as i64),
+                            ]);
+                            stream_reader
+                                .get_mut()
+                                .write_all(&payload.serialize())
+                                .await?;
+                        }
+                    }
+                    Command::Unsubscribe(channels_to_remove) => {
+                        for channel in channels_to_remove {
+                            let client_subs_len = self
+                                .unsubscribe_client_from_channel(request_count, &channel)
+                                .await;
+
+                            let payload = RespValue::Array(vec![
+                                RespValue::BulkString("unsubscribe".into()),
+                                RespValue::BulkString(channel),
+                                RespValue::Integer(client_subs_len as i64),
+                            ]);
+                            stream_reader
+                                .get_mut()
+                                .write_all(&payload.serialize())
+                                .await?;
+                        }
+                    }
+                    Command::Ping => {
+                        let payload = RespValue::Array(vec![
+                            RespValue::BulkString("pong".into()),
+                            RespValue::BulkString("".into()),
+                        ]);
+                        stream_reader
+                            .get_mut()
+                            .write_all(&payload.serialize())
+                            .await?;
+                    }
+                    other => {
+                        warn!("Unexpected command inside subscription: {:?}", other);
+                        stream_reader
+                                .get_mut()
+                                .write_all(
+                                    &RespValue::SimpleError(
+                                        format!("ERR Can't execute '{}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context ", other.short_name().to_lowercase()),
+                                    )
+                                    .serialize(),
+                                )
+                                .await?;
+                    }
+                },
+                Err(err) => {
+                    stream_reader
+                        .get_mut()
+                        .write_all(&RespValue::SimpleError(err).serialize())
+                        .await?;
+                }
+            },
+            None => {
+                debug!(
+                    "Subscription ended its TCP stream for req {}",
+                    request_count
+                );
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    async fn subscription_handle_publishing(
+        &self,
+        stream_reader: &mut StreamReader<'_>,
+        request_count: u64,
+    ) -> Result<(), Error> {
+        let mut channel_messages: HashMap<String, Vec<String>> = HashMap::new();
+
+        {
+            let mut subs = self.subscriptions.write().await;
+            let client_subs = subs
+                .get_mut(&request_count)
+                .expect("Cannot find client subs");
+
+            for (channel, stored_messages) in client_subs {
+                channel_messages.insert(channel.clone(), stored_messages.drain(..).collect());
+            }
+        }
+
+        for (channel, messages) in channel_messages {
+            for message in messages {
+                let payload = RespValue::Array(vec![
+                    RespValue::BulkString("message".into()),
+                    RespValue::BulkString(channel.clone()),
+                    RespValue::BulkString(message),
+                ]);
+                stream_reader
+                    .get_mut()
+                    .write_all(&payload.serialize())
+                    .await?;
+            }
+        }
+
+        Ok(())
     }
 }
