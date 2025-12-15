@@ -295,7 +295,7 @@ impl SortedSet {
         self.ordering
             .iter()
             .skip(start)
-            .take(end - start)
+            .take(end - start + 1)
             .map(|elem| elem.member.clone())
             .collect()
     }
