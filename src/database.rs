@@ -1,8 +1,7 @@
-use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::collections::{HashMap, VecDeque};
 
 use crate::common::{
-    current_time_ms, CompleteStreamEntryID, KeyValuePair, PatternMatcher, SortedSetElem,
-    StreamEntryID,
+    current_time_ms, CompleteStreamEntryID, KeyValuePair, PatternMatcher, SortedSet, StreamEntryID,
 };
 
 struct ValueEntry {
@@ -30,7 +29,7 @@ enum Entry {
     Value(ValueEntry),
     Array(VecDeque<String>),
     Stream(StreamEntry),
-    SortedSet(BTreeSet<SortedSetElem>),
+    SortedSet(SortedSet),
 }
 
 impl Entry {
@@ -455,16 +454,19 @@ impl Database {
         let Entry::SortedSet(entry) = self
             .dict
             .entry(key.clone())
-            .or_insert(Entry::SortedSet(BTreeSet::new()))
+            .or_insert(Entry::SortedSet(SortedSet::default()))
         else {
             unreachable!();
         };
 
+        let mut new_items = 0;
         for (score, member) in args {
-            entry.insert(SortedSetElem::new(*score, member.clone()));
+            if entry.insert(*score, member.clone()) {
+                new_items += 1;
+            }
         }
 
-        Ok(args.len())
+        Ok(new_items)
     }
 
     fn stream_read_single_from_id_exclusive(

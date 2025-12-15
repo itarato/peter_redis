@@ -2,6 +2,7 @@ use crate::commands::Command;
 use rand::rng;
 use rand::RngCore;
 use regex::Regex;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
@@ -250,6 +251,40 @@ impl Ord for SortedSetElem {
 impl SortedSetElem {
     pub(crate) fn new(score: f64, member: String) -> Self {
         Self { score, member }
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct SortedSet {
+    ordering: BTreeSet<SortedSetElem>,
+    members: HashMap<String, f64>,
+}
+
+impl SortedSet {
+    pub(crate) fn remove(&mut self, member: String) -> bool {
+        if !self.members.contains_key(&member) {
+            return false;
+        }
+
+        let elem = SortedSetElem::new(*self.members.get(&member).unwrap(), member.clone());
+        self.ordering.remove(&elem);
+        self.members.remove(&member);
+
+        true
+    }
+
+    pub(crate) fn insert(&mut self, score: f64, member: String) -> bool {
+        let mut is_new = true;
+        if self.members.contains_key(&member) {
+            self.remove(member.clone());
+            is_new = false;
+        }
+
+        self.members.insert(member.clone(), score);
+        self.ordering
+            .insert(SortedSetElem::new(score, member.clone()));
+
+        is_new
     }
 }
 
