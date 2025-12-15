@@ -423,6 +423,33 @@ impl CommandParser {
                         return Ok(Command::Publish(channel, message));
                     }
 
+                    if name.to_lowercase() == "zadd" {
+                        if items.len() < 4 {
+                            return Err("ERR wrong number of arguments for 'zadd' command".into());
+                        }
+
+                        let items_len = items.len();
+                        let mut str_items = Self::get_strings_exact(items, items_len, "zadd")?;
+                        str_items.remove(0); // Word zadd.
+
+                        let key = str_items.remove(0);
+                        if str_items.len() % 2 != 0 {
+                            return Err("ERR wrong number of arguments for 'zadd' command".into());
+                        }
+
+                        let mut args = vec![];
+                        while !str_items.is_empty() {
+                            let score = str_items
+                                .remove(0)
+                                .parse::<f64>()
+                                .expect("Parsing f64 score");
+                            let message = str_items.remove(0);
+                            args.push((score, message));
+                        }
+
+                        return Ok(Command::Zadd(key, args));
+                    }
+
                     return Ok(Command::Unknown(name.to_lowercase()));
                 } else {
                     return Ok(Command::Unknown("not-a-string".to_string()));

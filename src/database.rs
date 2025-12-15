@@ -1,7 +1,8 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 
 use crate::common::{
-    current_time_ms, CompleteStreamEntryID, KeyValuePair, PatternMatcher, StreamEntryID,
+    current_time_ms, CompleteStreamEntryID, KeyValuePair, PatternMatcher, SortedSetElem,
+    StreamEntryID,
 };
 
 struct ValueEntry {
@@ -29,6 +30,7 @@ enum Entry {
     Value(ValueEntry),
     Array(VecDeque<String>),
     Stream(StreamEntry),
+    SortedSet(BTreeSet<SortedSetElem>),
 }
 
 impl Entry {
@@ -53,11 +55,19 @@ impl Entry {
         }
     }
 
+    fn is_set(&self) -> bool {
+        match self {
+            Entry::SortedSet(_) => true,
+            _ => false,
+        }
+    }
+
     fn type_name(&self) -> &str {
         match self {
             Entry::Array(_) => "list",
             Entry::Value(_) => "string",
             Entry::Stream(_) => "stream",
+            Entry::SortedSet(_) => "sorted set",
         }
     }
 }
@@ -435,6 +445,28 @@ impl Database {
         out
     }
 
+    pub(crate) fn add_to_sorted_set(
+        &mut self,
+        key: &String,
+        args: &Vec<(f64, String)>,
+    ) -> Result<usize, String> {
+        self.assert_set(key)?;
+
+        let Entry::SortedSet(entry) = self
+            .dict
+            .entry(key.clone())
+            .or_insert(Entry::SortedSet(BTreeSet::new()))
+        else {
+            unreachable!();
+        };
+
+        for (score, member) in args {
+            entry.insert(SortedSetElem::new(*score, member.clone()));
+        }
+
+        Ok(args.len())
+    }
+
     fn stream_read_single_from_id_exclusive(
         &self,
         key: &str,
@@ -541,6 +573,18 @@ impl Database {
     fn assert_stream(&self, key: &str) -> Result<(), String> {
         if self.dict.contains_key(key) {
             if !self.dict.get(key).map(|v| v.is_stream()).unwrap() {
+                return Err(
+                    "WRONGTYPE Operation against a key holding the wrong kind of value".into(),
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    fn assert_set(&self, key: &str) -> Result<(), String> {
+        if self.dict.contains_key(key) {
+            if !self.dict.get(key).map(|v| v.is_set()).unwrap() {
                 return Err(
                     "WRONGTYPE Operation against a key holding the wrong kind of value".into(),
                 );

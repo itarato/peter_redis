@@ -233,9 +233,29 @@ impl PatternMatcher {
     }
 }
 
+#[derive(PartialEq, PartialOrd)]
+pub(crate) struct SortedSetElem {
+    score: f64,
+    member: String,
+}
+
+impl Eq for SortedSetElem {}
+
+impl Ord for SortedSetElem {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other).unwrap()
+    }
+}
+
+impl SortedSetElem {
+    pub(crate) fn new(score: f64, member: String) -> Self {
+        Self { score, member }
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use crate::common::PatternMatcher;
+    use crate::common::{PatternMatcher, SortedSetElem};
 
     #[test]
     fn test_pattern_matcher() {
@@ -257,6 +277,16 @@ mod test {
 
         assert!(PatternMatcher::new("a?c").is_match("abc"));
         assert!(!PatternMatcher::new("a?c").is_match("ac"));
+
         assert!(!PatternMatcher::new("a?c").is_match("abbc"));
+    }
+
+    #[test]
+    fn test_sorted_set_elem_ordering() {
+        assert!(SortedSetElem::new(1.23, "Foo".into()) == SortedSetElem::new(1.23, "Foo".into()));
+        assert!(SortedSetElem::new(1.22, "Foo".into()) < SortedSetElem::new(1.23, "Foo".into()));
+        assert!(SortedSetElem::new(1.24, "Foo".into()) > SortedSetElem::new(1.23, "Foo".into()));
+        assert!(SortedSetElem::new(1.23, "Foa".into()) < SortedSetElem::new(1.23, "Foo".into()));
+        assert!(SortedSetElem::new(1.23, "Fox".into()) > SortedSetElem::new(1.23, "Foo".into()));
     }
 }

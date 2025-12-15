@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum RespValue {
     SimpleString(String),
     BulkString(String),
@@ -8,6 +8,7 @@ pub(crate) enum RespValue {
     Integer(i64),
     SimpleError(String),
     BulkBytes(Vec<u8>),
+    Double(f64),
 }
 
 impl RespValue {
@@ -45,6 +46,7 @@ impl RespValue {
 
                 out
             }
+            Self::Double(n) => format!(",{}\r\n", n).as_bytes().to_vec(),
         }
     }
 

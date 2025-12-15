@@ -674,6 +674,11 @@ impl Engine {
                 RespValue::Integer(client_count as i64)
             }
 
+            Command::Zadd(key, args) => match self.db.write().await.add_to_sorted_set(key, args) {
+                Ok(added_count) => RespValue::Integer(added_count as i64),
+                Err(err) => RespValue::SimpleError(err),
+            },
+
             Command::Unknown(msg) => {
                 RespValue::SimpleError(format!("Unrecognized command: {}", msg))
             }

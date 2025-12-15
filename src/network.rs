@@ -84,6 +84,9 @@ impl<'a> StreamReader<'a> {
         } else if line.starts_with(":") {
             let v = i64::from_str_radix(&line[1..].trim(), 10).context("parse-array-len")?;
             return Ok(Some(RespValue::Integer(v)));
+        } else if line.starts_with(",") {
+            let v = line[1..].trim().parse::<f64>().expect("parsing-double");
+            return Ok(Some(RespValue::Double(v)));
         }
 
         Err(format!("Unexpected incoming RESP string from connection: {}", line).into())

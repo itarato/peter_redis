@@ -39,6 +39,10 @@ pub(crate) enum Command {
     Subscribe(Vec<String> /* Channels */),
     Unsubscribe(Vec<String> /* Channels */),
     Publish(String /* Channel */, String /* Message */),
+    Zadd(
+        String, /* Key */
+        Vec<(f64 /* Score */, String /* Member */)>,
+    ),
     // ---
     Unknown(String),
 }
@@ -97,6 +101,7 @@ impl Command {
             Command::Rpopn(_, _) => true,
             Command::Xadd(_, _, _) => true,
             Command::Incr(_) => true,
+            Command::Zadd(_, _) => true,
             // ---
             Command::Blpop(_, _) => false,
             Command::Brpop(_, _) => false,
@@ -158,6 +163,7 @@ impl Command {
             Command::Subscribe(_) => "subscribe",
             Command::Unsubscribe(_) => "unsubscribe",
             Command::Publish(_, _) => "publish",
+            Command::Zadd(_, _) => "zadd",
         }
     }
 
@@ -245,6 +251,26 @@ impl Command {
                 RespValue::BulkString("INCR".into()),
                 RespValue::BulkString(key.clone()),
             ]),
+
+            Command::Zadd(key, args) => {
+                let mut elems = vec![
+                    RespValue::BulkString("ZADD".into()),
+                    RespValue::BulkString(key.clone()),
+                ];
+                let mut arg_part = args
+                    .iter()
+                    .flat_map(|(score, member)| {
+                        vec![
+                            RespValue::BulkString(format!("{}", score)),
+                            RespValue::BulkString(member.clone()),
+                        ]
+                    })
+                    .collect::<Vec<_>>();
+
+                elems.append(&mut arg_part);
+
+                RespValue::Array(elems)
+            }
 
             _ => unimplemented!("Command resp-ization not implemented for {:?}", self),
         }
