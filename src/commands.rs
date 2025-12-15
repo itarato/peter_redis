@@ -43,6 +43,7 @@ pub(crate) enum Command {
         String, /* Key */
         Vec<(f64 /* Score */, String /* Member */)>,
     ),
+    Zrank(String /* Key */, String /* Member */),
     // ---
     Unknown(String),
 }
@@ -126,6 +127,7 @@ impl Command {
             Command::Subscribe(_) => false,
             Command::Unsubscribe(_) => false,
             Command::Publish(_, _) => false,
+            Command::Zrank(_, _) => false,
         }
     }
 
@@ -164,6 +166,7 @@ impl Command {
             Command::Unsubscribe(_) => "unsubscribe",
             Command::Publish(_, _) => "publish",
             Command::Zadd(_, _) => "zadd",
+            Command::Zrank(_, _) => "zrank",
         }
     }
 

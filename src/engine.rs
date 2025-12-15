@@ -679,6 +679,14 @@ impl Engine {
                 Err(err) => RespValue::SimpleError(err),
             },
 
+            Command::Zrank(key, member) => {
+                match self.db.read().await.sorted_set_rank(key, member) {
+                    Ok(Some(rank)) => RespValue::Integer(rank as i64),
+                    Ok(None) => RespValue::NullBulkString,
+                    Err(err) => RespValue::SimpleError(err),
+                }
+            }
+
             Command::Unknown(msg) => {
                 RespValue::SimpleError(format!("Unrecognized command: {}", msg))
             }

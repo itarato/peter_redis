@@ -469,6 +469,20 @@ impl Database {
         Ok(new_items)
     }
 
+    pub(crate) fn sorted_set_rank(&self, key: &str, member: &str) -> Result<Option<usize>, String> {
+        self.assert_set(key)?;
+
+        if !self.dict.contains_key(key) {
+            return Ok(None);
+        }
+
+        let Entry::SortedSet(set) = self.dict.get(key).unwrap() else {
+            unreachable!();
+        };
+
+        Ok(set.rank(member))
+    }
+
     fn stream_read_single_from_id_exclusive(
         &self,
         key: &str,

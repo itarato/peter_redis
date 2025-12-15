@@ -450,6 +450,15 @@ impl CommandParser {
                         return Ok(Command::Zadd(key, args));
                     }
 
+                    if name.to_lowercase() == "zrank" {
+                        let mut str_items = Self::get_strings_exact(items, 3, "zrank")?;
+                        str_items.remove(0); // Word zrank.
+                        let key = str_items.remove(0);
+                        let member = str_items.remove(0);
+
+                        return Ok(Command::Zrank(key, member));
+                    }
+
                     return Ok(Command::Unknown(name.to_lowercase()));
                 } else {
                     return Ok(Command::Unknown("not-a-string".to_string()));

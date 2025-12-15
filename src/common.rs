@@ -286,6 +286,10 @@ impl SortedSet {
 
         is_new
     }
+
+    pub(crate) fn rank(&self, member: &str) -> Option<usize> {
+        self.ordering.iter().position(|elem| elem.member == member)
+    }
 }
 
 #[cfg(test)]
