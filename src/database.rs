@@ -483,6 +483,14 @@ impl Database {
         Ok(set.rank(member))
     }
 
+    pub(crate) fn sorted_set_range(
+        &self,
+        key: &str,
+        min: f64,
+        max: f64,
+    ) -> Result<Vec<String>, String> {
+    }
+
     fn stream_read_single_from_id_exclusive(
         &self,
         key: &str,

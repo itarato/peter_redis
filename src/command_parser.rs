@@ -459,6 +459,21 @@ impl CommandParser {
                         return Ok(Command::Zrank(key, member));
                     }
 
+                    if name.to_lowercase() == "zrange" {
+                        let mut str_items = Self::get_strings_exact(items, 4, "zrange")?;
+                        str_items.remove(0); // Word zrange.
+                        let key = str_items.remove(0);
+                        let min = str_items
+                            .remove(0)
+                            .parse::<f64>()
+                            .expect("parsing-min-zrange");
+                        let max = str_items
+                            .remove(0)
+                            .parse::<f64>()
+                            .expect("parsing-max-zrange");
+                        return Ok(Command::Zrange(key, min, max));
+                    }
+
                     return Ok(Command::Unknown(name.to_lowercase()));
                 } else {
                     return Ok(Command::Unknown("not-a-string".to_string()));

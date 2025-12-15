@@ -44,6 +44,11 @@ pub(crate) enum Command {
         Vec<(f64 /* Score */, String /* Member */)>,
     ),
     Zrank(String /* Key */, String /* Member */),
+    Zrange(
+        String, /* Key */
+        f64,    /* Min */
+        f64,    /* Max */
+    ),
     // ---
     Unknown(String),
 }
@@ -128,6 +133,7 @@ impl Command {
             Command::Unsubscribe(_) => false,
             Command::Publish(_, _) => false,
             Command::Zrank(_, _) => false,
+            Command::Zrange(_, _, _) => false,
         }
     }
 
@@ -167,6 +173,7 @@ impl Command {
             Command::Publish(_, _) => "publish",
             Command::Zadd(_, _) => "zadd",
             Command::Zrank(_, _) => "zrank",
+            Command::Zrange(_, _, _) => "zrange",
         }
     }
 
