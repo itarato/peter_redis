@@ -290,6 +290,15 @@ impl SortedSet {
     pub(crate) fn rank(&self, member: &str) -> Option<usize> {
         self.ordering.iter().position(|elem| elem.member == member)
     }
+
+    pub(crate) fn range(&self, start: usize, end: usize) -> Vec<String> {
+        self.ordering
+            .iter()
+            .skip(start)
+            .take(end - start)
+            .map(|elem| elem.member.clone())
+            .collect()
+    }
 }
 
 #[cfg(test)]

@@ -46,8 +46,8 @@ pub(crate) enum Command {
     Zrank(String /* Key */, String /* Member */),
     Zrange(
         String, /* Key */
-        f64,    /* Min */
-        f64,    /* Max */
+        usize,  /* Min index */
+        usize,  /* Max index */
     ),
     // ---
     Unknown(String),

@@ -687,6 +687,18 @@ impl Engine {
                 }
             }
 
+            Command::Zrange(key, start, end) => {
+                match self.db.read().await.sorted_set_range(key, *start, *end) {
+                    Ok(members) => RespValue::Array(
+                        members
+                            .into_iter()
+                            .map(|member| RespValue::BulkString(member))
+                            .collect(),
+                    ),
+                    Err(err) => RespValue::SimpleError(err),
+                }
+            }
+
             Command::Unknown(msg) => {
                 RespValue::SimpleError(format!("Unrecognized command: {}", msg))
             }
