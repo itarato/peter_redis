@@ -299,6 +299,10 @@ impl SortedSet {
             .map(|elem| elem.member.clone())
             .collect()
     }
+
+    pub(crate) fn len(&self) -> usize {
+        self.ordering.len()
+    }
 }
 
 #[cfg(test)]

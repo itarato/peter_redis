@@ -463,8 +463,8 @@ impl CommandParser {
                         let mut str_items = Self::get_strings_exact(items, 4, "zrange")?;
                         str_items.remove(0); // Word zrange.
                         let key = str_items.remove(0);
-                        let min = to_number!(usize, &str_items.remove(0), "zrange");
-                        let max = to_number!(usize, &str_items.remove(0), "zrange");
+                        let min = to_number!(i64, &str_items.remove(0), "zrange");
+                        let max = to_number!(i64, &str_items.remove(0), "zrange");
                         return Ok(Command::Zrange(key, min, max));
                     }
 

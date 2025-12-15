@@ -4,6 +4,22 @@ use crate::common::{
     current_time_ms, CompleteStreamEntryID, KeyValuePair, PatternMatcher, SortedSet, StreamEntryID,
 };
 
+fn resolve_start_index(start: i64, len: usize) -> usize {
+    if start < 0 {
+        (start + len as i64).max(0) as usize
+    } else {
+        start as usize
+    }
+}
+
+fn resolve_end_index(end: i64, len: usize) -> usize {
+    if end < 0 {
+        (end + len as i64).max(0) as usize
+    } else {
+        end as usize
+    }
+}
+
 struct ValueEntry {
     value: String,
     expiry_timestamp_ms: Option<u128>,
@@ -191,21 +207,11 @@ impl Database {
             unreachable!();
         };
 
-        let start = if start < 0 {
-            (start + array.len() as i64).max(0)
-        } else {
-            start
-        };
-
-        let end = if end < 0 {
-            (end + array.len() as i64).max(0)
-        } else {
-            end
-        };
-
+        let start = resolve_start_index(start, array.len());
+        let end = resolve_end_index(end, array.len());
         let mut out = vec![];
         for i in start..=end {
-            if i >= array.len() as i64 {
+            if i >= array.len() {
                 break;
             }
 
@@ -486,8 +492,8 @@ impl Database {
     pub(crate) fn sorted_set_range(
         &self,
         key: &str,
-        start: usize,
-        end: usize,
+        start: i64,
+        end: i64,
     ) -> Result<Vec<String>, String> {
         self.assert_set(key)?;
 
@@ -499,7 +505,10 @@ impl Database {
             unreachable!();
         };
 
-        Ok(set.range(start, end))
+        Ok(set.range(
+            resolve_start_index(start, set.len()),
+            resolve_end_index(end, set.len()),
+        ))
     }
 
     fn stream_read_single_from_id_exclusive(
