@@ -302,7 +302,7 @@ impl SortedSet {
         true
     }
 
-    pub(crate) fn insert_geo(&mut self, lat: f64, lon: f64, member: String) -> bool {
+    pub(crate) fn insert_geo(&mut self, lon: f64, lat: f64, member: String) -> bool {
         let score = geohash(lat, lon);
 
         let mut is_new = true;
@@ -376,7 +376,7 @@ fn interleave(lhs: u32, rhs: u32) -> u64 {
     lhs64 | rhs_shifted
 }
 
-fn geohash(lat: f64, lon: f64) -> f64 {
+fn geohash(lon: f64, lat: f64) -> f64 {
     assert!(lat >= MIN_LAT);
     assert!(lat <= MAX_LAT);
     assert!(lon >= MIN_LON);
@@ -430,22 +430,22 @@ mod test {
 
     #[test]
     fn test_geohashing() {
-        assert_geohash(13.7220, 100.5252, 3962257306574459.0);
-        assert_geohash(39.9075, 116.3972, 4069885364908765.0);
-        assert_geohash(52.5244, 13.4105, 3673983964876493.0);
-        assert_geohash(55.6759, 12.5655, 3685973395504349.0);
-        assert_geohash(28.6667, 77.2167, 3631527070936756.0);
-        assert_geohash(27.7017, 85.3206, 3639507404773204.0);
-        assert_geohash(51.5074, -0.1278, 2163557714755072.0);
-        assert_geohash(40.7128, -74.0060, 1791873974549446.0);
-        assert_geohash(48.8534, 2.3488, 3663832752681684.0);
-        assert_geohash(-33.8688, 151.2093, 3252046221964352.0);
-        assert_geohash(35.6895, 139.6917, 4171231230197045.0);
-        assert_geohash(48.2064, 16.3707, 3673109836391743.0);
+        assert_geohash(100.5252, 13.7220, 3962257306574459.0);
+        assert_geohash(116.3972, 39.9075, 4069885364908765.0);
+        assert_geohash(13.4105, 52.5244, 3673983964876493.0);
+        assert_geohash(12.5655, 55.6759, 3685973395504349.0);
+        assert_geohash(77.2167, 28.6667, 3631527070936756.0);
+        assert_geohash(85.3206, 27.7017, 3639507404773204.0);
+        assert_geohash(-0.1278, 51.5074, 2163557714755072.0);
+        assert_geohash(-74.0060, 40.7128, 1791873974549446.0);
+        assert_geohash(2.3488, 48.8534, 3663832752681684.0);
+        assert_geohash(151.2093, -33.8688, 3252046221964352.0);
+        assert_geohash(139.6917, 35.6895, 4171231230197045.0);
+        assert_geohash(16.3707, 48.2064, 3673109836391743.0);
     }
 
-    fn assert_geohash(lat: f64, lon: f64, expexted: f64) {
-        let diff = (geohash(lat, lon) - expexted).abs();
+    fn assert_geohash(lon: f64, lat: f64, expexted: f64) {
+        let diff = (geohash(lon, lat) - expexted).abs();
         // dbg!(diff);
         assert!(diff < 1.0);
     }

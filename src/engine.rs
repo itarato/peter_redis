@@ -674,10 +674,12 @@ impl Engine {
                 RespValue::Integer(client_count as i64)
             }
 
-            Command::Zadd(key, args) => match self.db.write().await.add_to_sorted_set(key, args) {
-                Ok(added_count) => RespValue::Integer(added_count as i64),
-                Err(err) => RespValue::SimpleError(err),
-            },
+            Command::Zadd(key, args) => {
+                match self.db.write().await.add_score_to_sorted_set(key, args) {
+                    Ok(added_count) => RespValue::Integer(added_count as i64),
+                    Err(err) => RespValue::SimpleError(err),
+                }
+            }
 
             Command::Zrank(key, member) => {
                 match self.db.read().await.sorted_set_rank(key, member) {
@@ -721,6 +723,13 @@ impl Engine {
                 Ok(count) => RespValue::Integer(count as i64),
                 Err(err) => RespValue::SimpleError(err),
             },
+
+            Command::Geoadd(key, args) => {
+                match self.db.write().await.add_geo_to_sorted_set(key, args) {
+                    Ok(added_count) => RespValue::Integer(added_count as i64),
+                    Err(err) => RespValue::SimpleError(err),
+                }
+            }
 
             Command::Unknown(msg) => {
                 RespValue::SimpleError(format!("Unrecognized command: {}", msg))

@@ -450,7 +450,7 @@ impl Database {
         out
     }
 
-    pub(crate) fn add_to_sorted_set(
+    pub(crate) fn add_score_to_sorted_set(
         &mut self,
         key: &String,
         args: &Vec<(f64, String)>,
@@ -468,6 +468,31 @@ impl Database {
         let mut new_items = 0;
         for (score, member) in args {
             if entry.insert_score(*score, member.clone()) {
+                new_items += 1;
+            }
+        }
+
+        Ok(new_items)
+    }
+
+    pub(crate) fn add_geo_to_sorted_set(
+        &mut self,
+        key: &String,
+        args: &Vec<(f64, f64, String)>,
+    ) -> Result<usize, String> {
+        self.assert_set(key)?;
+
+        let Entry::SortedSet(entry) = self
+            .dict
+            .entry(key.clone())
+            .or_insert(Entry::SortedSet(SortedSet::default()))
+        else {
+            unreachable!();
+        };
+
+        let mut new_items = 0;
+        for (lon, lat, member) in args {
+            if entry.insert_geo(*lon, *lat, member.clone()) {
                 new_items += 1;
             }
         }

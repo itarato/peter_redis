@@ -443,8 +443,8 @@ impl CommandParser {
                                 .remove(0)
                                 .parse::<f64>()
                                 .expect("Parsing f64 score");
-                            let message = str_items.remove(0);
-                            args.push((score, message));
+                            let member = str_items.remove(0);
+                            args.push((score, member));
                         }
 
                         return Ok(Command::Zadd(key, args));
@@ -493,6 +493,37 @@ impl CommandParser {
                         str_items.remove(0); // Word zrem.
                         let key = str_items.remove(0);
                         return Ok(Command::Zrem(key, str_items));
+                    }
+
+                    if name.to_lowercase() == "geoadd" {
+                        if items.len() < 5 {
+                            return Err("ERR wrong number of arguments for 'geoadd' command".into());
+                        }
+
+                        let items_len = items.len();
+                        let mut str_items = Self::get_strings_exact(items, items_len, "geoadd")?;
+                        str_items.remove(0); // Word geoadd.
+
+                        let key = str_items.remove(0);
+                        if str_items.len() % 3 != 0 {
+                            return Err("ERR wrong number of arguments for 'geoadd' command".into());
+                        }
+
+                        let mut args = vec![];
+                        while !str_items.is_empty() {
+                            let lon = str_items
+                                .remove(0)
+                                .parse::<f64>()
+                                .expect("Parsing f64 longitude");
+                            let lat = str_items
+                                .remove(0)
+                                .parse::<f64>()
+                                .expect("Parsing f64 latitude");
+                            let member = str_items.remove(0);
+                            args.push((lon, lat, member));
+                        }
+
+                        return Ok(Command::Geoadd(key, args));
                     }
 
                     return Ok(Command::Unknown(name.to_lowercase()));

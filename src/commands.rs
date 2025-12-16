@@ -52,6 +52,10 @@ pub(crate) enum Command {
     Zcard(String /* Key */),
     Zscore(String /* Key */, String /* Member */),
     Zrem(String /* Key */, Vec<String> /* Members */),
+    Geoadd(
+        String,                  /* Key */
+        Vec<(f64, f64, String)>, /* Lon-lat-member pairs */
+    ),
     // ---
     Unknown(String),
 }
@@ -111,6 +115,7 @@ impl Command {
             Command::Xadd(_, _, _) => true,
             Command::Incr(_) => true,
             Command::Zadd(_, _) => true,
+            Command::Geoadd(_, _) => true,
             // ---
             Command::Blpop(_, _) => false,
             Command::Brpop(_, _) => false,
@@ -183,6 +188,7 @@ impl Command {
             Command::Zcard(_) => "zcard",
             Command::Zscore(_, _) => "zscore",
             Command::Zrem(_, _) => "zrem",
+            Command::Geoadd(_, _) => "geoadd",
         }
     }
 
@@ -289,6 +295,21 @@ impl Command {
                 elems.append(&mut arg_part);
 
                 RespValue::Array(elems)
+            }
+
+            Command::Geoadd(key, args) => {
+                let mut params = vec![
+                    RespValue::BulkString("GEOADD".into()),
+                    RespValue::BulkString(key.clone()),
+                ];
+
+                for (lon, lat, member) in args {
+                    params.push(RespValue::BulkString(lon.to_string()));
+                    params.push(RespValue::BulkString(lat.to_string()));
+                    params.push(RespValue::BulkString(member.clone()));
+                }
+
+                RespValue::Array(params)
             }
 
             _ => unimplemented!("Command resp-ization not implemented for {:?}", self),
