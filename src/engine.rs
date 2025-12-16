@@ -731,6 +731,23 @@ impl Engine {
                 }
             }
 
+            Command::Geopos(key, members) => {
+                match self.db.read().await.sorted_set_geopos(key, members) {
+                    Ok(coords) => RespValue::Array(
+                        coords
+                            .iter()
+                            .map(|(lon, lat)| {
+                                RespValue::Array(vec![
+                                    RespValue::BulkString(lon.to_string()),
+                                    RespValue::BulkString(lat.to_string()),
+                                ])
+                            })
+                            .collect(),
+                    ),
+                    Err(err) => RespValue::SimpleError(err),
+                }
+            }
+
             Command::Unknown(msg) => {
                 RespValue::SimpleError(format!("Unrecognized command: {}", msg))
             }

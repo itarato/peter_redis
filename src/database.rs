@@ -508,6 +508,34 @@ impl Database {
         Ok(new_items)
     }
 
+    pub(crate) fn sorted_set_geopos(
+        &self,
+        key: &str,
+        members: &Vec<String>,
+    ) -> Result<Vec<(f64, f64)>, String> {
+        self.assert_set(key)?;
+
+        if !self.dict.contains_key(key) {
+            return Ok(vec![]);
+        }
+
+        let Entry::SortedSet(set) = self.dict.get(key).unwrap() else {
+            unreachable!();
+        };
+
+        let mut coords = vec![];
+
+        for member in members {
+            if let Some((lon, lat)) = set.member_coords(member) {
+                if lon.is_some() && lat.is_some() {
+                    coords.push((lon.unwrap(), lat.unwrap()));
+                }
+            }
+        }
+
+        Ok(coords)
+    }
+
     pub(crate) fn sorted_set_rank(&self, key: &str, member: &str) -> Result<Option<usize>, String> {
         self.assert_set(key)?;
 

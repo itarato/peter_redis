@@ -526,6 +526,19 @@ impl CommandParser {
                         return Ok(Command::Geoadd(key, args));
                     }
 
+                    if name.to_lowercase() == "geopos" {
+                        if items.len() < 3 {
+                            return Err("ERR wrong number of arguments for 'geopos' command".into());
+                        }
+
+                        let items_len = items.len();
+                        let mut str_items = Self::get_strings_exact(items, items_len, "geopos")?;
+                        str_items.remove(0); // Word geopos.
+                        let key = str_items.remove(0);
+
+                        return Ok(Command::Geopos(key, str_items));
+                    }
+
                     return Ok(Command::Unknown(name.to_lowercase()));
                 } else {
                     return Ok(Command::Unknown("not-a-string".to_string()));
