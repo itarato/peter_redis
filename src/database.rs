@@ -525,6 +525,24 @@ impl Database {
         Ok(set.len())
     }
 
+    pub(crate) fn sorted_set_member_score(
+        &self,
+        key: &str,
+        member: &str,
+    ) -> Result<Option<f64>, String> {
+        self.assert_set(key)?;
+
+        if !self.dict.contains_key(key) {
+            return Ok(None);
+        }
+
+        let Entry::SortedSet(set) = self.dict.get(key).unwrap() else {
+            unreachable!();
+        };
+
+        Ok(set.member_score(member))
+    }
+
     fn stream_read_single_from_id_exclusive(
         &self,
         key: &str,

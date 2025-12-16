@@ -303,6 +303,10 @@ impl SortedSet {
     pub(crate) fn len(&self) -> usize {
         self.ordering.len()
     }
+
+    pub(crate) fn member_score(&self, member: &str) -> Option<f64> {
+        self.members.get(member).cloned()
+    }
 }
 
 #[cfg(test)]

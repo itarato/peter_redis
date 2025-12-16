@@ -50,6 +50,7 @@ pub(crate) enum Command {
         i64,    /* Max index */
     ),
     Zcard(String /* Key */),
+    Zscore(String /* Key */, String /* Member */),
     // ---
     Unknown(String),
 }
@@ -136,6 +137,7 @@ impl Command {
             Command::Zrank(_, _) => false,
             Command::Zrange(_, _, _) => false,
             Command::Zcard(_) => false,
+            Command::Zscore(_, _) => false,
         }
     }
 
@@ -177,6 +179,7 @@ impl Command {
             Command::Zrank(_, _) => "zrank",
             Command::Zrange(_, _, _) => "zrange",
             Command::Zcard(_) => "zcard",
+            Command::Zscore(_, _) => "zscore",
         }
     }
 
