@@ -483,6 +483,18 @@ impl CommandParser {
                         return Ok(Command::Zscore(key, member));
                     }
 
+                    if name.to_lowercase() == "zrem" {
+                        if items.len() < 3 {
+                            return Err("ERR wrong number of arguments for 'zrem' command".into());
+                        }
+
+                        let items_len = items.len();
+                        let mut str_items = Self::get_strings_exact(items, items_len, "zrem")?;
+                        str_items.remove(0); // Word zrem.
+                        let key = str_items.remove(0);
+                        return Ok(Command::Zrem(key, str_items));
+                    }
+
                     return Ok(Command::Unknown(name.to_lowercase()));
                 } else {
                     return Ok(Command::Unknown("not-a-string".to_string()));

@@ -51,6 +51,7 @@ pub(crate) enum Command {
     ),
     Zcard(String /* Key */),
     Zscore(String /* Key */, String /* Member */),
+    Zrem(String /* Key */, Vec<String> /* Members */),
     // ---
     Unknown(String),
 }
@@ -138,6 +139,7 @@ impl Command {
             Command::Zrange(_, _, _) => false,
             Command::Zcard(_) => false,
             Command::Zscore(_, _) => false,
+            Command::Zrem(_, _) => false,
         }
     }
 
@@ -180,6 +182,7 @@ impl Command {
             Command::Zrange(_, _, _) => "zrange",
             Command::Zcard(_) => "zcard",
             Command::Zscore(_, _) => "zscore",
+            Command::Zrem(_, _) => "zrem",
         }
     }
 

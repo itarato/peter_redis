@@ -712,6 +712,16 @@ impl Engine {
                 }
             }
 
+            Command::Zrem(key, members) => match self
+                .db
+                .write()
+                .await
+                .sorted_set_remove_members(key, members.clone())
+            {
+                Ok(count) => RespValue::Integer(count as i64),
+                Err(err) => RespValue::SimpleError(err),
+            },
+
             Command::Unknown(msg) => {
                 RespValue::SimpleError(format!("Unrecognized command: {}", msg))
             }

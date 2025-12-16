@@ -543,6 +543,31 @@ impl Database {
         Ok(set.member_score(member))
     }
 
+    pub(crate) fn sorted_set_remove_members(
+        &mut self,
+        key: &str,
+        members: Vec<String>,
+    ) -> Result<usize, String> {
+        self.assert_set(key)?;
+
+        if !self.dict.contains_key(key) {
+            return Ok(0);
+        }
+
+        let Entry::SortedSet(set) = self.dict.get_mut(key).unwrap() else {
+            unreachable!();
+        };
+
+        let mut total = 0;
+        for member in members {
+            if set.remove(member) {
+                total += 1;
+            }
+        }
+
+        Ok(total)
+    }
+
     fn stream_read_single_from_id_exclusive(
         &self,
         key: &str,
