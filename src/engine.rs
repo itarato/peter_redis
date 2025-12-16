@@ -736,11 +736,15 @@ impl Engine {
                     Ok(coords) => RespValue::Array(
                         coords
                             .iter()
-                            .map(|(lon, lat)| {
-                                RespValue::Array(vec![
-                                    RespValue::BulkString(lon.to_string()),
-                                    RespValue::BulkString(lat.to_string()),
-                                ])
+                            .map(|maybe_coord| {
+                                maybe_coord
+                                    .map(|(lon, lat)| {
+                                        RespValue::Array(vec![
+                                            RespValue::BulkString(lon.to_string()),
+                                            RespValue::BulkString(lat.to_string()),
+                                        ])
+                                    })
+                                    .unwrap_or(RespValue::NullArray)
                             })
                             .collect(),
                     ),

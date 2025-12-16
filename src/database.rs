@@ -512,11 +512,11 @@ impl Database {
         &self,
         key: &str,
         members: &Vec<String>,
-    ) -> Result<Vec<(f64, f64)>, String> {
+    ) -> Result<Vec<Option<(f64, f64)>>, String> {
         self.assert_set(key)?;
 
         if !self.dict.contains_key(key) {
-            return Ok(vec![]);
+            return Ok(members.iter().map(|_| None).collect());
         }
 
         let Entry::SortedSet(set) = self.dict.get(key).unwrap() else {
@@ -528,9 +528,12 @@ impl Database {
         for member in members {
             if let Some((lon, lat)) = set.member_coords(member) {
                 if lon.is_some() && lat.is_some() {
-                    coords.push((lon.unwrap(), lat.unwrap()));
+                    coords.push(Some((lon.unwrap(), lat.unwrap())));
+                    continue;
                 }
             }
+
+            coords.push(None);
         }
 
         Ok(coords)
