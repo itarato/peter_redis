@@ -49,6 +49,7 @@ pub(crate) enum Command {
         i64,    /* Min index */
         i64,    /* Max index */
     ),
+    Zcard(String /* Key */),
     // ---
     Unknown(String),
 }
@@ -134,6 +135,7 @@ impl Command {
             Command::Publish(_, _) => false,
             Command::Zrank(_, _) => false,
             Command::Zrange(_, _, _) => false,
+            Command::Zcard(_) => false,
         }
     }
 
@@ -174,6 +176,7 @@ impl Command {
             Command::Zadd(_, _) => "zadd",
             Command::Zrank(_, _) => "zrank",
             Command::Zrange(_, _, _) => "zrange",
+            Command::Zcard(_) => "zcard",
         }
     }
 

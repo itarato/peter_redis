@@ -468,6 +468,13 @@ impl CommandParser {
                         return Ok(Command::Zrange(key, min, max));
                     }
 
+                    if name.to_lowercase() == "zcard" {
+                        let mut str_items = Self::get_strings_exact(items, 2, "zcard")?;
+                        str_items.remove(0); // Word zcard.
+                        let key = str_items.remove(0);
+                        return Ok(Command::Zcard(key));
+                    }
+
                     return Ok(Command::Unknown(name.to_lowercase()));
                 } else {
                     return Ok(Command::Unknown("not-a-string".to_string()));

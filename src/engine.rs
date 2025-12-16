@@ -699,6 +699,11 @@ impl Engine {
                 }
             }
 
+            Command::Zcard(key) => match self.db.read().await.sorted_set_len(key) {
+                Ok(len) => RespValue::Integer(len as i64),
+                Err(err) => RespValue::SimpleError(err),
+            },
+
             Command::Unknown(msg) => {
                 RespValue::SimpleError(format!("Unrecognized command: {}", msg))
             }

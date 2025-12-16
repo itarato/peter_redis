@@ -511,6 +511,20 @@ impl Database {
         ))
     }
 
+    pub(crate) fn sorted_set_len(&self, key: &str) -> Result<usize, String> {
+        self.assert_set(key)?;
+
+        if !self.dict.contains_key(key) {
+            return Ok(0);
+        }
+
+        let Entry::SortedSet(set) = self.dict.get(key).unwrap() else {
+            unreachable!();
+        };
+
+        Ok(set.len())
+    }
+
     fn stream_read_single_from_id_exclusive(
         &self,
         key: &str,
