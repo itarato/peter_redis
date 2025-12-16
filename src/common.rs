@@ -8,10 +8,10 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::u128;
 
-const MIN_LAT: f64 = -85.05112878;
-const MAX_LAT: f64 = 85.05112878;
-const MIN_LON: f64 = -180.0;
-const MAX_LON: f64 = 180.0;
+pub(crate) const MIN_LAT: f64 = -85.05112878;
+pub(crate) const MAX_LAT: f64 = 85.05112878;
+pub(crate) const MIN_LON: f64 = -180.0;
+pub(crate) const MAX_LON: f64 = 180.0;
 
 pub(crate) type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -261,24 +261,24 @@ impl SortedSetElem {
 
 pub(crate) struct SortedSetData {
     pub(crate) score: f64,
-    pub(crate) lat: Option<f64>,
-    pub(crate) lon: Option<f64>,
+    lon: Option<f64>,
+    lat: Option<f64>,
 }
 
 impl SortedSetData {
-    fn with_geo(score: f64, lat: f64, lon: f64) -> Self {
+    fn with_geo(score: f64, lon: f64, lat: f64) -> Self {
         Self {
             score,
-            lat: Some(lat),
             lon: Some(lon),
+            lat: Some(lat),
         }
     }
 
     fn with_score(score: f64) -> Self {
         Self {
             score,
-            lat: None,
             lon: None,
+            lat: None,
         }
     }
 }
@@ -303,7 +303,7 @@ impl SortedSet {
     }
 
     pub(crate) fn insert_geo(&mut self, lon: f64, lat: f64, member: String) -> bool {
-        let score = geohash(lat, lon);
+        let score = geohash(lon, lat);
 
         let mut is_new = true;
         if self.members.contains_key(&member) {
@@ -312,7 +312,7 @@ impl SortedSet {
         }
 
         self.members
-            .insert(member.clone(), SortedSetData::with_geo(score, lat, lon));
+            .insert(member.clone(), SortedSetData::with_geo(score, lon, lat));
         self.ordering
             .insert(SortedSetElem::new(score, member.clone()));
 

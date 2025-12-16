@@ -2,6 +2,7 @@ use std::collections::{HashMap, VecDeque};
 
 use crate::common::{
     current_time_ms, CompleteStreamEntryID, KeyValuePair, PatternMatcher, SortedSet, StreamEntryID,
+    MAX_LAT, MAX_LON, MIN_LAT, MIN_LON,
 };
 
 fn resolve_start_index(start: i64, len: usize) -> usize {
@@ -492,6 +493,13 @@ impl Database {
 
         let mut new_items = 0;
         for (lon, lat, member) in args {
+            if lon < &MIN_LON || lon > &MAX_LON || lat < &MIN_LAT || lat > &MAX_LAT {
+                return Err(format!(
+                    "ERR invalid longitude,latitude pair {},{}",
+                    lon, lat
+                ));
+            }
+
             if entry.insert_geo(*lon, *lat, member.clone()) {
                 new_items += 1;
             }
