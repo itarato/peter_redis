@@ -527,10 +527,8 @@ impl Database {
 
         for member in members {
             if let Some((lon, lat)) = set.member_coords(member) {
-                if lon.is_some() && lat.is_some() {
-                    coords.push(Some((lon.unwrap(), lat.unwrap())));
-                    continue;
-                }
+                coords.push(Some((lon, lat)));
+                continue;
             }
 
             coords.push(None);

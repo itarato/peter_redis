@@ -261,25 +261,23 @@ impl SortedSetElem {
 
 pub(crate) struct SortedSetData {
     pub(crate) score: f64,
-    lon: Option<f64>,
-    lat: Option<f64>,
+    lon: f64,
+    lat: f64,
 }
 
 impl SortedSetData {
     fn with_geo(score: f64, lon: f64, lat: f64) -> Self {
         Self {
             score,
-            lon: Some(lon),
-            lat: Some(lat),
+            lon: lon,
+            lat: lat,
         }
     }
 
     fn with_score(score: f64) -> Self {
-        Self {
-            score,
-            lon: None,
-            lat: None,
-        }
+        let (lon, lat) = decode_geohash(score);
+
+        Self { score, lon, lat }
     }
 }
 
@@ -303,7 +301,7 @@ impl SortedSet {
     }
 
     pub(crate) fn insert_geo(&mut self, lon: f64, lat: f64, member: String) -> bool {
-        let score = geohash(lon, lat);
+        let score = encode_geohash(lon, lat);
 
         let mut is_new = true;
         if self.members.contains_key(&member) {
@@ -355,7 +353,7 @@ impl SortedSet {
         self.members.get(member).map(|elem| elem.score)
     }
 
-    pub(crate) fn member_coords(&self, member: &str) -> Option<(Option<f64>, Option<f64>)> {
+    pub(crate) fn member_coords(&self, member: &str) -> Option<(f64, f64)> {
         self.members.get(member).map(|elem| (elem.lon, elem.lat))
     }
 }
@@ -372,15 +370,7 @@ fn spread_u32_to_u64(v: u32) -> u64 {
     v
 }
 
-fn interleave(lhs: u32, rhs: u32) -> u64 {
-    let lhs64 = spread_u32_to_u64(lhs);
-    let rhs64 = spread_u32_to_u64(rhs);
-    let rhs_shifted = rhs64 << 1;
-
-    lhs64 | rhs_shifted
-}
-
-fn geohash(lon: f64, lat: f64) -> f64 {
+fn encode_geohash(lon: f64, lat: f64) -> f64 {
     assert!(lat >= MIN_LAT);
     assert!(lat <= MAX_LAT);
     assert!(lon >= MIN_LON);
@@ -392,12 +382,49 @@ fn geohash(lon: f64, lat: f64) -> f64 {
     let norm_lat: u32 = ((1u64 << 26u64) as f64 * (lat - MIN_LAT) / lat_range) as u32;
     let norm_lon: u32 = ((1u64 << 26u64) as f64 * (lon - MIN_LON) / lon_range) as u32;
 
-    interleave(norm_lat, norm_lon) as f64
+    let lhs64 = spread_u32_to_u64(norm_lat);
+    let rhs64 = spread_u32_to_u64(norm_lon);
+    let rhs_shifted = rhs64 << 1;
+
+    (lhs64 | rhs_shifted) as f64
+}
+
+fn compact_u64_to_u32(mut v: u64) -> u32 {
+    v = v & 0x5555555555555555;
+
+    v = (v | (v >> 1)) & 0x3333_3333_3333_3333;
+    v = (v | (v >> 2)) & 0x0F0F_0F0F_0F0F_0F0F;
+    v = (v | (v >> 4)) & 0x00FF_00FF_00FF_00FF;
+    v = (v | (v >> 8)) & 0x0000_FFFF_0000_FFFF;
+    v = (v | (v >> 16)) & 0x0000_0000_FFFF_FFFF;
+
+    v as u32
+}
+
+fn decode_geohash(hash: f64) -> (f64, f64) {
+    let rhs = hash as u64 >> 1;
+    let lhs = hash as u64;
+
+    let grid_lon = compact_u64_to_u32(rhs) as f64;
+    let grid_lat = compact_u64_to_u32(lhs) as f64;
+
+    let lat_range = MAX_LAT - MIN_LAT;
+    let lon_range = MAX_LON - MIN_LON;
+
+    let grid_lat_min = MIN_LAT + lat_range * (grid_lat / (1u32 << 26) as f64);
+    let grid_lat_max = MIN_LAT + lat_range * ((grid_lat + 1.0) / (1u32 << 26) as f64);
+    let grid_lon_min = MIN_LON + lon_range * (grid_lon / (1u32 << 26) as f64);
+    let grid_lon_max = MIN_LON + lon_range * ((grid_lon + 1.0) / (1u32 << 26) as f64);
+
+    let lat = (grid_lat_min + grid_lat_max) / 2.0;
+    let lon = (grid_lon_min + grid_lon_max) / 2.0;
+
+    (lon, lat)
 }
 
 #[cfg(test)]
 mod test {
-    use crate::common::{geohash, PatternMatcher, SortedSetElem};
+    use crate::common::{decode_geohash, encode_geohash, PatternMatcher, SortedSetElem};
 
     #[test]
     fn test_pattern_matcher() {
@@ -448,8 +475,13 @@ mod test {
         assert_geohash(16.3707, 48.2064, 3673109836391743.0);
     }
 
+    #[test]
+    fn test_geohash_decode() {
+        dbg!(decode_geohash(3663832614298053.0));
+    }
+
     fn assert_geohash(lon: f64, lat: f64, expexted: f64) {
-        let diff = (geohash(lon, lat) - expexted).abs();
+        let diff = (encode_geohash(lon, lat) - expexted).abs();
         // dbg!(diff);
         assert!(diff < 1.0);
     }
