@@ -8,6 +8,11 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::u128;
 
+const MIN_LAT: f64 = -85.05112878;
+const MAX_LAT: f64 = 85.05112878;
+const MIN_LON: f64 = -180.0;
+const MAX_LON: f64 = 180.0;
+
 pub(crate) type Error = Box<dyn std::error::Error + Send + Sync>;
 
 pub(crate) struct ReaderRole {
@@ -254,10 +259,34 @@ impl SortedSetElem {
     }
 }
 
+pub(crate) struct SortedSetData {
+    pub(crate) score: f64,
+    pub(crate) lat: Option<f64>,
+    pub(crate) lon: Option<f64>,
+}
+
+impl SortedSetData {
+    fn with_geo(score: f64, lat: f64, lon: f64) -> Self {
+        Self {
+            score,
+            lat: Some(lat),
+            lon: Some(lon),
+        }
+    }
+
+    fn with_score(score: f64) -> Self {
+        Self {
+            score,
+            lat: None,
+            lon: None,
+        }
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct SortedSet {
     ordering: BTreeSet<SortedSetElem>,
-    members: HashMap<String, f64>,
+    members: HashMap<String, SortedSetData>,
 }
 
 impl SortedSet {
@@ -266,21 +295,39 @@ impl SortedSet {
             return false;
         }
 
-        let elem = SortedSetElem::new(*self.members.get(&member).unwrap(), member.clone());
+        let elem = SortedSetElem::new(self.members.get(&member).unwrap().score, member.clone());
         self.ordering.remove(&elem);
         self.members.remove(&member);
 
         true
     }
 
-    pub(crate) fn insert(&mut self, score: f64, member: String) -> bool {
+    pub(crate) fn insert_geo(&mut self, lat: f64, lon: f64, member: String) -> bool {
+        let score = geohash(lat, lon);
+
         let mut is_new = true;
         if self.members.contains_key(&member) {
             self.remove(member.clone());
             is_new = false;
         }
 
-        self.members.insert(member.clone(), score);
+        self.members
+            .insert(member.clone(), SortedSetData::with_geo(score, lat, lon));
+        self.ordering
+            .insert(SortedSetElem::new(score, member.clone()));
+
+        is_new
+    }
+
+    pub(crate) fn insert_score(&mut self, score: f64, member: String) -> bool {
+        let mut is_new = true;
+        if self.members.contains_key(&member) {
+            self.remove(member.clone());
+            is_new = false;
+        }
+
+        self.members
+            .insert(member.clone(), SortedSetData::with_score(score));
         self.ordering
             .insert(SortedSetElem::new(score, member.clone()));
 
@@ -305,13 +352,48 @@ impl SortedSet {
     }
 
     pub(crate) fn member_score(&self, member: &str) -> Option<f64> {
-        self.members.get(member).cloned()
+        self.members.get(member).map(|elem| elem.score)
     }
+}
+
+fn spread_u32_to_u64(v: u32) -> u64 {
+    let mut v = (v & 0xFFFF_FFFF) as u64;
+
+    v = (v | (v << 16)) & 0x0000_FFFF_0000_FFFF;
+    v = (v | (v << 8)) & 0x00FF_00FF_00FF_00FF;
+    v = (v | (v << 4)) & 0x0F0F_0F0F_0F0F_0F0F;
+    v = (v | (v << 2)) & 0x3333_3333_3333_3333;
+    v = (v | (v << 1)) & 0x5555_5555_5555_5555;
+
+    v
+}
+
+fn interleave(lhs: u32, rhs: u32) -> u64 {
+    let lhs64 = spread_u32_to_u64(lhs);
+    let rhs64 = spread_u32_to_u64(rhs);
+    let rhs_shifted = rhs64 << 1;
+
+    lhs64 | rhs_shifted
+}
+
+fn geohash(lat: f64, lon: f64) -> f64 {
+    assert!(lat >= MIN_LAT);
+    assert!(lat <= MAX_LAT);
+    assert!(lon >= MIN_LON);
+    assert!(lon <= MAX_LON);
+
+    let lat_range = MAX_LAT - MIN_LAT;
+    let lon_range = MAX_LON - MIN_LON;
+
+    let norm_lat: u32 = ((1u64 << 26u64) as f64 * (lat - MIN_LAT) / lat_range) as u32;
+    let norm_lon: u32 = ((1u64 << 26u64) as f64 * (lon - MIN_LON) / lon_range) as u32;
+
+    interleave(norm_lat, norm_lon) as f64
 }
 
 #[cfg(test)]
 mod test {
-    use crate::common::{PatternMatcher, SortedSetElem};
+    use crate::common::{geohash, PatternMatcher, SortedSetElem};
 
     #[test]
     fn test_pattern_matcher() {
@@ -344,5 +426,27 @@ mod test {
         assert!(SortedSetElem::new(1.24, "Foo".into()) > SortedSetElem::new(1.23, "Foo".into()));
         assert!(SortedSetElem::new(1.23, "Foa".into()) < SortedSetElem::new(1.23, "Foo".into()));
         assert!(SortedSetElem::new(1.23, "Fox".into()) > SortedSetElem::new(1.23, "Foo".into()));
+    }
+
+    #[test]
+    fn test_geohashing() {
+        assert_geohash(13.7220, 100.5252, 3962257306574459.0);
+        assert_geohash(39.9075, 116.3972, 4069885364908765.0);
+        assert_geohash(52.5244, 13.4105, 3673983964876493.0);
+        assert_geohash(55.6759, 12.5655, 3685973395504349.0);
+        assert_geohash(28.6667, 77.2167, 3631527070936756.0);
+        assert_geohash(27.7017, 85.3206, 3639507404773204.0);
+        assert_geohash(51.5074, -0.1278, 2163557714755072.0);
+        assert_geohash(40.7128, -74.0060, 1791873974549446.0);
+        assert_geohash(48.8534, 2.3488, 3663832752681684.0);
+        assert_geohash(-33.8688, 151.2093, 3252046221964352.0);
+        assert_geohash(35.6895, 139.6917, 4171231230197045.0);
+        assert_geohash(48.2064, 16.3707, 3673109836391743.0);
+    }
+
+    fn assert_geohash(lat: f64, lon: f64, expexted: f64) {
+        let diff = (geohash(lat, lon) - expexted).abs();
+        // dbg!(diff);
+        assert!(diff < 1.0);
     }
 }

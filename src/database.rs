@@ -467,7 +467,7 @@ impl Database {
 
         let mut new_items = 0;
         for (score, member) in args {
-            if entry.insert(*score, member.clone()) {
+            if entry.insert_score(*score, member.clone()) {
                 new_items += 1;
             }
         }
