@@ -586,6 +586,19 @@ impl CommandParser {
                                         "acl getuser",
                                     )?));
                                 }
+
+                                if sub_command.to_lowercase() == "setuser" {
+                                    let mut str_items =
+                                        Self::get_strings_exact(items, 4, "acl setuser")?;
+                                    let user = str_items.remove(2);
+                                    let password_part = str_items.remove(2);
+                                    if &password_part[0..=0] == ">" {
+                                        return Ok(Command::AclSetuser(
+                                            user,
+                                            password_part[1..].to_string(),
+                                        ));
+                                    }
+                                }
                             }
                         }
                     }

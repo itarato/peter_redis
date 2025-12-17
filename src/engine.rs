@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::Context;
+use sha256::digest;
 use tokio::{
     io::AsyncWriteExt,
     net::TcpSocket,
@@ -29,6 +30,20 @@ enum ArrayDirection {
     Back,
 }
 
+struct User {
+    password: String,
+}
+
+impl User {
+    fn new(password: String) -> Self {
+        Self { password }
+    }
+
+    fn password_hash(&self) -> String {
+        digest(&self.password)
+    }
+}
+
 pub(crate) struct Engine {
     db: RwLock<Database>,
     dir: String,
@@ -40,6 +55,7 @@ pub(crate) struct Engine {
     wr_read_client_offset_notify: Arc<Notify>,
     subscriptions: RwLock<HashMap<u64, HashMap<String, VecDeque<String>>>>,
     subscription_notify: Notify,
+    users: RwLock<HashMap<String, User>>,
 }
 
 impl Engine {
@@ -68,6 +84,7 @@ impl Engine {
             wr_read_client_offset_notify: Arc::new(Notify::new()),
             subscriptions: RwLock::new(HashMap::new()),
             subscription_notify: Notify::new(),
+            users: RwLock::new(HashMap::new()),
         }
     }
 
@@ -784,13 +801,28 @@ impl Engine {
                 RespValue::BulkString("flags".into()),
                 RespValue::Array(
                     self.user_flags(user)
+                        .await
                         .into_iter()
                         .map(|elem| RespValue::BulkString(elem))
                         .collect(),
                 ),
                 RespValue::BulkString("passwords".into()),
-                RespValue::Array(vec![]),
+                RespValue::Array(
+                    self.user_passwords(user)
+                        .await
+                        .into_iter()
+                        .map(|elem| RespValue::BulkString(elem))
+                        .collect(),
+                ),
             ]),
+
+            Command::AclSetuser(user, password) => {
+                self.users
+                    .write()
+                    .await
+                    .insert(user.clone(), User::new(password.clone()));
+                RespValue::BulkString("OK".into())
+            }
 
             Command::Unknown(msg) => {
                 RespValue::SimpleError(format!("Unrecognized command: {}", msg))
@@ -1417,11 +1449,21 @@ impl Engine {
         Ok(())
     }
 
-    fn user_flags(&self, user: &str) -> Vec<String> {
-        if user == "default" {
-            vec!["nopass".into()]
-        } else {
-            vec![]
-        }
+    async fn user_flags(&self, user: &str) -> Vec<String> {
+        self.users
+            .read()
+            .await
+            .get(user)
+            .map(|_user| vec![])
+            .unwrap_or(vec!["nopass".into()])
+    }
+
+    async fn user_passwords(&self, user: &str) -> Vec<String> {
+        self.users
+            .read()
+            .await
+            .get(user)
+            .map(|user| vec![user.password_hash()])
+            .unwrap_or(vec![])
     }
 }

@@ -69,6 +69,7 @@ pub(crate) enum Command {
     ),
     AclWhoami,
     AclGetuser(String /* User */),
+    AclSetuser(String /* User */, String /* Password */),
     // ---
     Unknown(String),
 }
@@ -163,6 +164,7 @@ impl Command {
             Command::Geosearch(_, _, _) => false,
             Command::AclWhoami => false,
             Command::AclGetuser(_) => false,
+            Command::AclSetuser(_, _) => false,
         }
     }
 
@@ -212,6 +214,7 @@ impl Command {
             Command::Geosearch(_, _, _) => "geosearch",
             Command::AclWhoami => "acl whoami",
             Command::AclGetuser(_) => "acl getuser",
+            Command::AclSetuser(_, _) => "acl setuser",
         }
     }
 
