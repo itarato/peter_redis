@@ -763,6 +763,21 @@ impl Engine {
                 Err(err) => RespValue::SimpleError(err),
             },
 
+            Command::Geosearch(key, coord, radius) => match self
+                .db
+                .read()
+                .await
+                .sorted_set_geo_search(key, coord.0, coord.1, *radius)
+            {
+                Ok(members) => RespValue::Array(
+                    members
+                        .into_iter()
+                        .map(|member| RespValue::BulkString(member))
+                        .collect(),
+                ),
+                Err(err) => RespValue::SimpleError(err),
+            },
+
             Command::Unknown(msg) => {
                 RespValue::SimpleError(format!("Unrecognized command: {}", msg))
             }

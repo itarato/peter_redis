@@ -657,6 +657,35 @@ impl Database {
         Ok(total)
     }
 
+    pub(crate) fn sorted_set_geo_search(
+        &self,
+        key: &str,
+        lon: f64,
+        lat: f64,
+        radius: f64,
+    ) -> Result<Vec<String>, String> {
+        self.assert_set(key)?;
+
+        if !self.dict.contains_key(key) {
+            return Ok(vec![]);
+        }
+
+        let Entry::SortedSet(set) = self.dict.get(key).unwrap() else {
+            unreachable!();
+        };
+
+        let mut in_range = vec![];
+        for member in set.members() {
+            let coord = set.member_coords(member).unwrap();
+            let dist = geohash_get_distance(lon, lat, coord.0, coord.1);
+            if dist <= radius {
+                in_range.push(member.clone());
+            }
+        }
+
+        Ok(in_range)
+    }
+
     fn stream_read_single_from_id_exclusive(
         &self,
         key: &str,

@@ -62,6 +62,11 @@ pub(crate) enum Command {
         String, /* Member */
         String, /* Member */
     ),
+    Geosearch(
+        String,     /* Key */
+        (f64, f64), /* Lon-lat */
+        f64,        /* Radius */
+    ),
     // ---
     Unknown(String),
 }
@@ -153,6 +158,7 @@ impl Command {
             Command::Zrem(_, _) => false,
             Command::Geopos(_, _) => false,
             Command::Geodist(_, _, _) => false,
+            Command::Geosearch(_, _, _) => false,
         }
     }
 
@@ -199,6 +205,7 @@ impl Command {
             Command::Geoadd(_, _) => "geoadd",
             Command::Geopos(_, _) => "geopos",
             Command::Geodist(_, _, _) => "geodist",
+            Command::Geosearch(_, _, _) => "geosearch",
         }
     }
 

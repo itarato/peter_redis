@@ -548,6 +548,31 @@ impl CommandParser {
                         return Ok(Command::Geodist(key, lhs, rhs));
                     }
 
+                    if name.to_lowercase() == "geosearch" {
+                        let mut str_items = Self::get_strings_exact(items, 8, "geosearch")?;
+                        str_items.remove(0); // Word geosearch.
+                        let key = str_items.remove(0);
+
+                        if str_items.remove(0).to_lowercase() != "fromlonlat" {
+                            return Ok(Command::Unknown(name.to_lowercase()));
+                        }
+
+                        let lon = str_items.remove(0).parse::<f64>().expect("parse-lon");
+                        let lat = str_items.remove(0).parse::<f64>().expect("parse-lat");
+
+                        if str_items.remove(0).to_lowercase() != "byradius" {
+                            return Ok(Command::Unknown(name.to_lowercase()));
+                        }
+
+                        let radius = str_items.remove(0).parse::<f64>().expect("parse-radius");
+
+                        if str_items.remove(0).to_lowercase() != "m" {
+                            return Ok(Command::Unknown(name.to_lowercase()));
+                        }
+
+                        return Ok(Command::Geosearch(key, (lon, lat), radius));
+                    }
+
                     return Ok(Command::Unknown(name.to_lowercase()));
                 } else {
                     return Ok(Command::Unknown("not-a-string".to_string()));

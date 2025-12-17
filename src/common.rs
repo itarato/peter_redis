@@ -356,6 +356,10 @@ impl SortedSet {
     pub(crate) fn member_coords(&self, member: &str) -> Option<(f64, f64)> {
         self.members.get(member).map(|elem| (elem.lon, elem.lat))
     }
+
+    pub(crate) fn members(&self) -> Vec<&String> {
+        self.members.keys().collect()
+    }
 }
 
 fn spread_u32_to_u64(v: u32) -> u64 {
