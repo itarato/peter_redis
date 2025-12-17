@@ -788,6 +788,8 @@ impl Engine {
                         .map(|elem| RespValue::BulkString(elem))
                         .collect(),
                 ),
+                RespValue::BulkString("passwords".into()),
+                RespValue::Array(vec![]),
             ]),
 
             Command::Unknown(msg) => {
