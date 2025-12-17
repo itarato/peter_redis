@@ -370,7 +370,7 @@ fn spread_u32_to_u64(v: u32) -> u64 {
     v
 }
 
-fn encode_geohash(lon: f64, lat: f64) -> f64 {
+pub(crate) fn encode_geohash(lon: f64, lat: f64) -> f64 {
     assert!(lat >= MIN_LAT);
     assert!(lat <= MAX_LAT);
     assert!(lon >= MIN_LON);
@@ -401,7 +401,7 @@ fn compact_u64_to_u32(mut v: u64) -> u32 {
     v as u32
 }
 
-fn decode_geohash(hash: f64) -> (f64, f64) {
+pub(crate) fn decode_geohash(hash: f64) -> (f64, f64) {
     let rhs = hash as u64 >> 1;
     let lhs = hash as u64;
 
@@ -424,39 +424,22 @@ fn decode_geohash(hash: f64) -> (f64, f64) {
 
 const EARTH_RADIUS_IN_METERS: f64 = 6372797.560856;
 
-fn deg_rad(ang: f64) -> f64 {
-    ang * (std::f64::consts::PI / 180.0)
-}
-
-fn geohash_get_lat_distance(lat1d: f64, lat2d: f64) -> f64 {
-    EARTH_RADIUS_IN_METERS * (deg_rad(lat2d) - deg_rad(lat1d)).abs()
-}
-
 pub(crate) fn geohash_get_distance(lon1d: f64, lat1d: f64, lon2d: f64, lat2d: f64) -> f64 {
-    let u: f64;
-    let v: f64;
-    let a: f64;
+    let lat1 = lat1d.to_radians();
+    let lat2 = lat2d.to_radians();
+    let d_lat = lat2 - lat1;
+    let d_lon = (lon2d - lon1d).to_radians();
 
-    let lon1r = deg_rad(lon1d);
-    let lon2r = deg_rad(lon2d);
-    v = ((lon2r - lon1r) / 2.0).sin();
-
-    if v == 0.0 {
-        return geohash_get_lat_distance(lat1d, lat2d);
-    }
-
-    let lat1r = deg_rad(lat1d);
-    let lat2r = deg_rad(lat2d);
-
-    u = ((lat2r - lat1r) / 2.0).sin();
-    a = u * u + lat1r.cos() * lat2r.cos() * v * v;
-
-    return 2.0 * EARTH_RADIUS_IN_METERS * a.sqrt().asin();
+    let a = (d_lat / 2.0).sin().powi(2) + (d_lon / 2.0).sin().powi(2) * lat1.cos() * lat2.cos();
+    let c = 2.0 * a.sqrt().asin();
+    EARTH_RADIUS_IN_METERS * c
 }
 
 #[cfg(test)]
 mod test {
-    use crate::common::{decode_geohash, encode_geohash, PatternMatcher, SortedSetElem};
+    use crate::common::{
+        decode_geohash, encode_geohash, geohash_get_distance, PatternMatcher, SortedSetElem,
+    };
 
     #[test]
     fn test_pattern_matcher() {
@@ -516,5 +499,32 @@ mod test {
         let diff = (encode_geohash(lon, lat) - expexted).abs();
         // dbg!(diff);
         assert!(diff < 1.0);
+    }
+
+    #[test]
+    fn test_geodist1() {
+        let actual = geohash_get_distance(
+            104.40118753384803,
+            -76.97514594029536,
+            96.49848464354902,
+            44.750533591587164,
+        );
+        let expected = 13550492.00422531;
+        let diff = (actual - expected).abs();
+        dbg!(diff);
+        assert!(diff < 0.0001);
+    }
+
+    #[test]
+    fn test_geodist2() {
+        let (lon1, lat1) = decode_geohash(encode_geohash(-74.15093763136399, -61.91578641950368));
+        let (lon2, lat2) = decode_geohash(encode_geohash(137.26070012474287, 25.91180220379407));
+
+        let actual = geohash_get_distance(lon1, lat1, lon2, lat2);
+        let expected = 15385284.571358781;
+        let diff = (actual - expected).abs();
+        dbg!(actual);
+        dbg!(diff);
+        assert!(diff < 0.0001);
     }
 }

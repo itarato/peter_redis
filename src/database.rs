@@ -1,8 +1,8 @@
 use std::collections::{HashMap, VecDeque};
 
 use crate::common::{
-    current_time_ms, geohash_get_distance, CompleteStreamEntryID, KeyValuePair, PatternMatcher,
-    SortedSet, StreamEntryID, MAX_LAT, MAX_LON, MIN_LAT, MIN_LON,
+    current_time_ms, decode_geohash, encode_geohash, geohash_get_distance, CompleteStreamEntryID,
+    KeyValuePair, PatternMatcher, SortedSet, StreamEntryID, MAX_LAT, MAX_LON, MIN_LAT, MIN_LON,
 };
 
 fn resolve_start_index(start: i64, len: usize) -> usize {
@@ -555,12 +555,9 @@ impl Database {
 
         if let Some(coord_lhs) = set.member_coords(member_lhs) {
             if let Some(coord_rhs) = set.member_coords(member_rhs) {
-                return Ok(Some(geohash_get_distance(
-                    coord_lhs.0,
-                    coord_lhs.1,
-                    coord_rhs.0,
-                    coord_rhs.1,
-                )));
+                let (lon1, lat1) = decode_geohash(encode_geohash(coord_lhs.0, coord_lhs.1));
+                let (lon2, lat2) = decode_geohash(encode_geohash(coord_rhs.0, coord_rhs.1));
+                return Ok(Some(geohash_get_distance(lon1, lat1, lon2, lat2)));
             }
         }
 
