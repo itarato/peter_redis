@@ -573,6 +573,16 @@ impl CommandParser {
                         return Ok(Command::Geosearch(key, (lon, lat), radius));
                     }
 
+                    if name.to_ascii_lowercase() == "acl" {
+                        if items.len() > 1 {
+                            if let Some(sub_command) = items[1].as_string().cloned() {
+                                if sub_command.to_lowercase() == "whoami" {
+                                    return Ok(Command::AclWhoami);
+                                }
+                            }
+                        }
+                    }
+
                     return Ok(Command::Unknown(name.to_lowercase()));
                 } else {
                     return Ok(Command::Unknown("not-a-string".to_string()));

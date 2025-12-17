@@ -67,6 +67,7 @@ pub(crate) enum Command {
         (f64, f64), /* Lon-lat */
         f64,        /* Radius */
     ),
+    AclWhoami,
     // ---
     Unknown(String),
 }
@@ -159,6 +160,7 @@ impl Command {
             Command::Geopos(_, _) => false,
             Command::Geodist(_, _, _) => false,
             Command::Geosearch(_, _, _) => false,
+            Command::AclWhoami => false,
         }
     }
 
@@ -206,6 +208,7 @@ impl Command {
             Command::Geopos(_, _) => "geopos",
             Command::Geodist(_, _, _) => "geodist",
             Command::Geosearch(_, _, _) => "geosearch",
+            Command::AclWhoami => "acl whoami",
         }
     }
 

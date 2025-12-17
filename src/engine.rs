@@ -778,6 +778,8 @@ impl Engine {
                 Err(err) => RespValue::SimpleError(err),
             },
 
+            Command::AclWhoami => RespValue::BulkString("default".into()),
+
             Command::Unknown(msg) => {
                 RespValue::SimpleError(format!("Unrecognized command: {}", msg))
             }
