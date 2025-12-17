@@ -780,6 +780,11 @@ impl Engine {
 
             Command::AclWhoami => RespValue::BulkString("default".into()),
 
+            Command::AclGetuser(_user) => RespValue::Array(vec![
+                RespValue::BulkString("flags".into()),
+                RespValue::Array(vec![]),
+            ]),
+
             Command::Unknown(msg) => {
                 RespValue::SimpleError(format!("Unrecognized command: {}", msg))
             }

@@ -68,6 +68,7 @@ pub(crate) enum Command {
         f64,        /* Radius */
     ),
     AclWhoami,
+    AclGetuser(String /* User */),
     // ---
     Unknown(String),
 }
@@ -161,6 +162,7 @@ impl Command {
             Command::Geodist(_, _, _) => false,
             Command::Geosearch(_, _, _) => false,
             Command::AclWhoami => false,
+            Command::AclGetuser(_) => false,
         }
     }
 
@@ -209,6 +211,7 @@ impl Command {
             Command::Geodist(_, _, _) => "geodist",
             Command::Geosearch(_, _, _) => "geosearch",
             Command::AclWhoami => "acl whoami",
+            Command::AclGetuser(_) => "acl getuser",
         }
     }
 

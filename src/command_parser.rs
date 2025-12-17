@@ -579,6 +579,13 @@ impl CommandParser {
                                 if sub_command.to_lowercase() == "whoami" {
                                     return Ok(Command::AclWhoami);
                                 }
+
+                                if sub_command.to_lowercase() == "getuser" {
+                                    return Ok(Command::AclGetuser(Self::get_string(
+                                        &items[2],
+                                        "acl getuser",
+                                    )?));
+                                }
                             }
                         }
                     }
@@ -590,6 +597,13 @@ impl CommandParser {
             }
             _ => return Ok(Command::Unknown("not-an-array".to_string())),
         }
+    }
+
+    fn get_string(value: &RespValue, command_name: &str) -> Result<String, String> {
+        value.as_string().cloned().ok_or(format!(
+            "ERR wrong value type for '{}' command",
+            command_name
+        ))
     }
 
     fn get_strings_exact(
