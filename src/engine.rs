@@ -821,7 +821,7 @@ impl Engine {
                     .write()
                     .await
                     .insert(user.clone(), User::new(password.clone()));
-                RespValue::BulkString("OK".into())
+                RespValue::SimpleString("OK".into())
             }
 
             Command::Unknown(msg) => {
