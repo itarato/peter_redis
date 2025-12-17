@@ -539,6 +539,15 @@ impl CommandParser {
                         return Ok(Command::Geopos(key, str_items));
                     }
 
+                    if name.to_lowercase() == "geodist" {
+                        let mut str_items = Self::get_strings_exact(items, 4, "geodist")?;
+                        str_items.remove(0); // Word geodist.
+                        let key = str_items.remove(0);
+                        let lhs = str_items.remove(0);
+                        let rhs = str_items.remove(0);
+                        return Ok(Command::Geodist(key, lhs, rhs));
+                    }
+
                     return Ok(Command::Unknown(name.to_lowercase()));
                 } else {
                     return Ok(Command::Unknown("not-a-string".to_string()));

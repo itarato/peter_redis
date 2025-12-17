@@ -57,6 +57,11 @@ pub(crate) enum Command {
         Vec<(f64, f64, String)>, /* Lon-lat-member pairs */
     ),
     Geopos(String /* String */, Vec<String> /* Members */),
+    Geodist(
+        String, /* Key */
+        String, /* Member */
+        String, /* Member */
+    ),
     // ---
     Unknown(String),
 }
@@ -147,6 +152,7 @@ impl Command {
             Command::Zscore(_, _) => false,
             Command::Zrem(_, _) => false,
             Command::Geopos(_, _) => false,
+            Command::Geodist(_, _, _) => false,
         }
     }
 
@@ -192,6 +198,7 @@ impl Command {
             Command::Zrem(_, _) => "zrem",
             Command::Geoadd(_, _) => "geoadd",
             Command::Geopos(_, _) => "geopos",
+            Command::Geodist(_, _, _) => "geodist",
         }
     }
 

@@ -1,8 +1,8 @@
 use std::collections::{HashMap, VecDeque};
 
 use crate::common::{
-    current_time_ms, CompleteStreamEntryID, KeyValuePair, PatternMatcher, SortedSet, StreamEntryID,
-    MAX_LAT, MAX_LON, MIN_LAT, MIN_LON,
+    current_time_ms, geohash_get_distance, CompleteStreamEntryID, KeyValuePair, PatternMatcher,
+    SortedSet, StreamEntryID, MAX_LAT, MAX_LON, MIN_LAT, MIN_LON,
 };
 
 fn resolve_start_index(start: i64, len: usize) -> usize {
@@ -535,6 +535,36 @@ impl Database {
         }
 
         Ok(coords)
+    }
+
+    pub(crate) fn sorted_set_geodist(
+        &self,
+        key: &str,
+        member_lhs: &str,
+        member_rhs: &str,
+    ) -> Result<Option<f64>, String> {
+        self.assert_set(key)?;
+
+        if !self.dict.contains_key(key) {
+            return Ok(None);
+        }
+
+        let Entry::SortedSet(set) = self.dict.get(key).unwrap() else {
+            unreachable!();
+        };
+
+        if let Some(coord_lhs) = set.member_coords(member_lhs) {
+            if let Some(coord_rhs) = set.member_coords(member_rhs) {
+                return Ok(Some(geohash_get_distance(
+                    coord_lhs.0,
+                    coord_lhs.1,
+                    coord_rhs.0,
+                    coord_rhs.1,
+                )));
+            }
+        }
+
+        Ok(None)
     }
 
     pub(crate) fn sorted_set_rank(&self, key: &str, member: &str) -> Result<Option<usize>, String> {

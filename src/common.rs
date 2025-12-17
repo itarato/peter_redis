@@ -422,6 +422,38 @@ fn decode_geohash(hash: f64) -> (f64, f64) {
     (lon, lat)
 }
 
+const EARTH_RADIUS_IN_METERS: f64 = 6372797.560856;
+
+fn deg_rad(ang: f64) -> f64 {
+    ang * (std::f64::consts::PI / 180.0)
+}
+
+fn geohash_get_lat_distance(lat1d: f64, lat2d: f64) -> f64 {
+    EARTH_RADIUS_IN_METERS * (deg_rad(lat2d) - deg_rad(lat1d)).abs()
+}
+
+pub(crate) fn geohash_get_distance(lon1d: f64, lat1d: f64, lon2d: f64, lat2d: f64) -> f64 {
+    let u: f64;
+    let v: f64;
+    let a: f64;
+
+    let lon1r = deg_rad(lon1d);
+    let lon2r = deg_rad(lon2d);
+    v = ((lon2r - lon1r) / 2.0).sin();
+
+    if v == 0.0 {
+        return geohash_get_lat_distance(lat1d, lat2d);
+    }
+
+    let lat1r = deg_rad(lat1d);
+    let lat2r = deg_rad(lat2d);
+
+    u = ((lat2r - lat1r) / 2.0).sin();
+    a = u * u + lat1r.cos() * lat2r.cos() * v * v;
+
+    return 2.0 * EARTH_RADIUS_IN_METERS * a.sqrt().asin();
+}
+
 #[cfg(test)]
 mod test {
     use crate::common::{decode_geohash, encode_geohash, PatternMatcher, SortedSetElem};

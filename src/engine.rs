@@ -752,6 +752,17 @@ impl Engine {
                 }
             }
 
+            Command::Geodist(key, member_lhs, member_rhs) => match self
+                .db
+                .read()
+                .await
+                .sorted_set_geodist(key, member_lhs, member_rhs)
+            {
+                Ok(Some(val)) => RespValue::BulkString(val.to_string()),
+                Ok(None) => RespValue::NullBulkString,
+                Err(err) => RespValue::SimpleError(err),
+            },
+
             Command::Unknown(msg) => {
                 RespValue::SimpleError(format!("Unrecognized command: {}", msg))
             }
