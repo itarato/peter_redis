@@ -780,9 +780,14 @@ impl Engine {
 
             Command::AclWhoami => RespValue::BulkString("default".into()),
 
-            Command::AclGetuser(_user) => RespValue::Array(vec![
+            Command::AclGetuser(user) => RespValue::Array(vec![
                 RespValue::BulkString("flags".into()),
-                RespValue::Array(vec![]),
+                RespValue::Array(
+                    self.user_flags(user)
+                        .into_iter()
+                        .map(|elem| RespValue::BulkString(elem))
+                        .collect(),
+                ),
             ]),
 
             Command::Unknown(msg) => {
@@ -1408,5 +1413,13 @@ impl Engine {
         }
 
         Ok(())
+    }
+
+    fn user_flags(&self, user: &str) -> Vec<String> {
+        if user == "default" {
+            vec!["nopass".into()]
+        } else {
+            vec![]
+        }
     }
 }
