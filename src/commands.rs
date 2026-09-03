@@ -24,6 +24,11 @@ pub(crate) enum Command {
     Xrange(String, RangeStreamEntryID, RangeStreamEntryID, usize),
     Xread(Vec<(String, RangeStreamEntryID)>, usize, Option<u128>),
     Incr(String),
+    Setbit {
+        key: String,
+        bit: usize,
+        value: u8,
+    },
     Multi,
     Exec,
     Discard,
@@ -147,6 +152,7 @@ impl Command {
             Command::Incr(_) => true,
             Command::Zadd(_, _) => true,
             Command::Geoadd(_, _) => true,
+            Command::Setbit { .. } => true,
             // ---
             Command::Blpop(_, _) => false,
             Command::Brpop(_, _) => false,
@@ -238,6 +244,7 @@ impl Command {
             Command::Auth(_, _) => "auth",
             Command::Watch(_) => "watch",
             Command::Unwatch => "unwatch",
+            Command::Setbit { .. } => "setbit",
         }
     }
 
@@ -357,6 +364,17 @@ impl Command {
                     params.push(RespValue::BulkString(lat.to_string()));
                     params.push(RespValue::BulkString(member.clone()));
                 }
+
+                RespValue::Array(params)
+            }
+
+            Command::Setbit { key, bit, value } => {
+                let params = vec![
+                    RespValue::BulkString("SETBIT".into()),
+                    RespValue::BulkString(key.clone()),
+                    RespValue::BulkString(bit.to_string()),
+                    RespValue::BulkString(value.to_string()),
+                ];
 
                 RespValue::Array(params)
             }

@@ -443,6 +443,11 @@ impl Engine {
                 Err(err) => RespValue::SimpleError(err),
             },
 
+            Command::Setbit { key, bit, value } => {
+                let old_value = self.db.write().await.set_bit(key, *bit, *value)?;
+                RespValue::Integer(old_value as i64)
+            }
+
             Command::Lrange(key, start, end) => {
                 match self.db.read().await.get_list_lrange(key, *start, *end) {
                     Ok(array) => RespValue::Array(

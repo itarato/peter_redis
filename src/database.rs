@@ -26,6 +26,16 @@ struct ValueEntry {
     expiry_timestamp_ms: Option<u128>,
 }
 
+struct Bits {
+    bits: Vec<u64>,
+}
+
+impl Bits {
+    pub(crate) fn new() -> Self {
+        Self { bits: vec![] }
+    }
+}
+
 pub(crate) type KeyValuePairList = Vec<KeyValuePair>;
 
 #[derive(Clone)]
@@ -47,6 +57,7 @@ enum Entry {
     Array(VecDeque<String>),
     Stream(StreamEntry),
     SortedSet(SortedSet),
+    Bits(Bits),
 }
 
 impl Entry {
@@ -78,12 +89,20 @@ impl Entry {
         }
     }
 
+    fn is_bits(&self) -> bool {
+        match self {
+            Entry::Bits { .. } => true,
+            _ => false,
+        }
+    }
+
     fn type_name(&self) -> &str {
         match self {
             Entry::Array(_) => "list",
             Entry::Value(_) => "string",
             Entry::Stream(_) => "stream",
             Entry::SortedSet(_) => "sorted set",
+            Entry::Bits(_) => "bit",
         }
     }
 }
@@ -146,6 +165,40 @@ impl Database {
                 Some(&value_entry.value)
             }
         }))
+    }
+
+    pub(crate) fn set_bit(&mut self, key: &str, bit: usize, value: u8) -> Result<u8, String> {
+        if self.dict.contains_key(key) {
+            self.assert_bits(key)?;
+        } else {
+            self.dict.insert(key.to_owned(), Entry::Bits(Bits::new()));
+        }
+
+        let mut bits = self
+            .dict
+            .get_mut(key)
+            .and_then(|entry| {
+                let Entry::Bits(bits) = entry else {
+                    unreachable!();
+                };
+
+                Some(bits)
+            })
+            .unwrap();
+
+        let u64_index = bit / 64;
+        while bits.bits.len() <= u64_index {
+            bits.bits.push(0);
+        }
+
+        let bit_i = bit % 64;
+        let old_u64 = bits.bits[u64_index];
+        let old_value = (old_u64 >> bit_i) & 1;
+
+        bits.bits[u64_index] =
+            (old_u64 & !((1u64 << bit_i) as u64)) | ((value as u64) << (bit_i as u64));
+
+        Ok(old_value as u8)
     }
 
     pub(crate) fn push_to_array(
@@ -804,6 +857,18 @@ impl Database {
     fn assert_set(&self, key: &str) -> Result<(), String> {
         if self.dict.contains_key(key) {
             if !self.dict.get(key).map(|v| v.is_set()).unwrap() {
+                return Err(
+                    "WRONGTYPE Operation against a key holding the wrong kind of value".into(),
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    fn assert_bits(&self, key: &str) -> Result<(), String> {
+        if self.dict.contains_key(key) {
+            if !self.dict.get(key).map(|v| v.is_bits()).unwrap() {
                 return Err(
                     "WRONGTYPE Operation against a key holding the wrong kind of value".into(),
                 );
