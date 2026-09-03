@@ -632,9 +632,19 @@ impl CommandParser {
                             .map_err(|_| "Cannot convert to usize")?;
                         let value: u8 = Self::get_string(&items[3], "setbit")?
                             .parse::<u8>()
-                            .map_err(|_| "Cannot convert to usize")?;
+                            .map_err(|_| "Cannot convert to u8")?;
 
                         return Ok(Command::Setbit { key, bit, value });
+                    }
+
+                    if name.to_lowercase() == "getbit" {
+                        Self::assert_argument_count(&items, 3, "getbit")?;
+                        let key = Self::get_string(&items[1], "getbit")?;
+                        let bit = Self::get_string(&items[2], "getbit")?
+                            .parse::<usize>()
+                            .map_err(|_| "Cannot convert to usize")?;
+
+                        return Ok(Command::Getbit { key, bit });
                     }
 
                     return Ok(Command::Unknown(name.to_lowercase()));

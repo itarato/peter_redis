@@ -448,6 +448,11 @@ impl Engine {
                 RespValue::Integer(old_value as i64)
             }
 
+            Command::Getbit { key, bit } => {
+                let value = self.db.write().await.get_bit(key, *bit)?;
+                RespValue::Integer(value as i64)
+            }
+
             Command::Lrange(key, start, end) => {
                 match self.db.read().await.get_list_lrange(key, *start, *end) {
                     Ok(array) => RespValue::Array(

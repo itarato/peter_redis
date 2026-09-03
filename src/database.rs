@@ -201,6 +201,37 @@ impl Database {
         Ok(old_value as u8)
     }
 
+    pub(crate) fn get_bit(&self, key: &str, bit: usize) -> Result<u8, String> {
+        if self.dict.contains_key(key) {
+            self.assert_bits(key)?;
+        } else {
+            return Ok(0);
+        }
+
+        let bits = self
+            .dict
+            .get(key)
+            .and_then(|entry| {
+                let Entry::Bits(bits) = entry else {
+                    unreachable!();
+                };
+
+                Some(bits)
+            })
+            .unwrap();
+
+        let u64_index = bit / 64;
+        if bits.bits.len() <= u64_index {
+            return Ok(0);
+        }
+
+        let bit_i = bit % 64;
+        let old_u64 = bits.bits[u64_index];
+        let old_value = (old_u64 >> bit_i) & 1;
+
+        Ok(old_value as u8)
+    }
+
     pub(crate) fn push_to_array(
         &mut self,
         key: String,

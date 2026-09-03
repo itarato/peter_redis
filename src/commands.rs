@@ -29,6 +29,10 @@ pub(crate) enum Command {
         bit: usize,
         value: u8,
     },
+    Getbit {
+        key: String,
+        bit: usize,
+    },
     Multi,
     Exec,
     Discard,
@@ -191,6 +195,7 @@ impl Command {
             Command::Auth(_, _) => false,
             Command::Watch(_) => false,
             Command::Unwatch => false,
+            Command::Getbit { .. } => false,
         }
     }
 
@@ -245,6 +250,7 @@ impl Command {
             Command::Watch(_) => "watch",
             Command::Unwatch => "unwatch",
             Command::Setbit { .. } => "setbit",
+            Command::Getbit { .. } => "getbit",
         }
     }
 
