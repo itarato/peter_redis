@@ -33,6 +33,11 @@ pub(crate) enum Command {
         key: String,
         bit: usize,
     },
+    Bitcount {
+        key: String,
+        start_byte: usize,
+        end_byte: usize,
+    },
     Multi,
     Exec,
     Discard,
@@ -200,6 +205,7 @@ impl Command {
             Command::Unwatch => false,
             Command::Getbit { .. } => false,
             Command::Strlen { .. } => false,
+            Command::Bitcount { .. } => false,
         }
     }
 
@@ -256,6 +262,7 @@ impl Command {
             Command::Setbit { .. } => "setbit",
             Command::Getbit { .. } => "getbit",
             Command::Strlen { .. } => "strlen",
+            Command::Bitcount { .. } => "bitcount",
         }
     }
 

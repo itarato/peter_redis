@@ -1,8 +1,9 @@
 use std::collections::{HashMap, VecDeque};
 
 use crate::common::{
-    current_time_ms, decode_geohash, encode_geohash, geohash_get_distance, CompleteStreamEntryID,
-    KeyValuePair, PatternMatcher, SortedSet, StreamEntryID, MAX_LAT, MAX_LON, MIN_LAT, MIN_LON,
+    bitcount, current_time_ms, decode_geohash, encode_geohash, geohash_get_distance,
+    CompleteStreamEntryID, KeyValuePair, PatternMatcher, SortedSet, StreamEntryID, MAX_LAT,
+    MAX_LON, MIN_LAT, MIN_LON,
 };
 
 fn resolve_start_index(start: i64, len: usize) -> usize {
@@ -247,6 +248,38 @@ impl Database {
             .unwrap();
 
         return Ok(entry.value.len());
+    }
+
+    pub(crate) fn bitcount(
+        &self,
+        key: &str,
+        start_byte: usize,
+        end_byte: usize,
+    ) -> Result<usize, String> {
+        if self.dict.contains_key(key) {
+            self.assert_single_value(key)?;
+        } else {
+            return Ok(0);
+        }
+
+        let entry = self
+            .dict
+            .get(key)
+            .and_then(|entry| {
+                let Entry::Value(entry) = entry else {
+                    unreachable!();
+                };
+
+                Some(entry)
+            })
+            .unwrap();
+
+        let mut total = 0;
+        for byte in &entry.value.as_bytes()[start_byte..=end_byte.min(entry.value.len() - 1)] {
+            total += bitcount(*byte);
+        }
+
+        return Ok(total);
     }
 
     pub(crate) fn push_to_array(

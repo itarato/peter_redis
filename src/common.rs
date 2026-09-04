@@ -430,6 +430,18 @@ pub(crate) fn geohash_get_distance(lon1d: f64, lat1d: f64, lon2d: f64, lat2d: f6
     EARTH_RADIUS_IN_METERS * c
 }
 
+pub(crate) fn bitcount(byte: u8) -> usize {
+    let mut b = byte;
+    let mut total = 0;
+    for _ in 0..8 {
+        if b & 1 == 1 {
+            total += 1;
+        }
+        b >>= 1;
+    }
+    return total;
+}
+
 #[cfg(test)]
 mod test {
     use crate::common::{

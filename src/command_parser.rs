@@ -654,6 +654,39 @@ impl CommandParser {
                         return Ok(Command::Strlen { key });
                     }
 
+                    if name.to_lowercase() == "bitcount" {
+                        let items_len = items.len();
+
+                        if items_len < 2 || items_len > 4 {
+                            return Err(
+                                "ERR wrong number of arguments for bitcount command".to_string()
+                            );
+                        }
+
+                        let key = Self::get_string(&items[1], "bitcount")?;
+
+                        let start_byte = if items_len >= 3 {
+                            Self::get_string(&items[2], "bitcount")?
+                                .parse::<usize>()
+                                .map_err(|_| "Cannot convert to usize")?
+                        } else {
+                            0
+                        };
+                        let end_byte = if items_len >= 4 {
+                            Self::get_string(&items[3], "bitcount")?
+                                .parse::<usize>()
+                                .map_err(|_| "Cannot convert to usize")?
+                        } else {
+                            usize::MAX
+                        };
+
+                        return Ok(Command::Bitcount {
+                            key,
+                            start_byte,
+                            end_byte,
+                        });
+                    }
+
                     return Ok(Command::Unknown(name.to_lowercase()));
                 } else {
                     return Ok(Command::Unknown("not-a-string".to_string()));
