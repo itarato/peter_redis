@@ -2,7 +2,7 @@ use core::f64;
 use std::{u128, usize, vec};
 
 use crate::{
-    commands::Command,
+    commands::{BitOperation, Command},
     common::{CompleteStreamEntryID, RangeStreamEntryID, StreamEntryID},
     resp::RespValue,
 };
@@ -684,6 +684,22 @@ impl CommandParser {
                             key,
                             start_byte,
                             end_byte,
+                        });
+                    }
+
+                    if name.to_lowercase() == "bitop" {
+                        Self::assert_argument_count(&items, 5, "bitop")?;
+
+                        let op = BitOperation::parse_from(&Self::get_string(&items[1], "bitop")?)?;
+                        let dest_key = Self::get_string(&items[2], "bitop")?;
+                        let src_lhs_key = Self::get_string(&items[3], "bitop")?;
+                        let src_rhs_key = Self::get_string(&items[4], "bitop")?;
+
+                        return Ok(Command::Bitop {
+                            op,
+                            dest_key,
+                            src_lhs_key,
+                            src_rhs_key,
                         });
                     }
 

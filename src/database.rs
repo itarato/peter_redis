@@ -1,9 +1,12 @@
 use std::collections::{HashMap, VecDeque};
 
-use crate::common::{
-    bitcount, current_time_ms, decode_geohash, encode_geohash, geohash_get_distance,
-    CompleteStreamEntryID, KeyValuePair, PatternMatcher, SortedSet, StreamEntryID, MAX_LAT,
-    MAX_LON, MIN_LAT, MIN_LON,
+use crate::{
+    commands::BitOperation,
+    common::{
+        bitcount, current_time_ms, decode_geohash, encode_geohash, geohash_get_distance,
+        CompleteStreamEntryID, KeyValuePair, PatternMatcher, SortedSet, StreamEntryID, MAX_LAT,
+        MAX_LON, MIN_LAT, MIN_LON,
+    },
 };
 
 fn resolve_start_index(start: i64, len: usize) -> usize {
@@ -22,6 +25,7 @@ fn resolve_end_index(end: i64, len: usize) -> usize {
     }
 }
 
+#[derive(Default)]
 struct ValueEntry {
     value: Vec<u8>,
     expiry_timestamp_ms: Option<u128>,
@@ -285,6 +289,73 @@ impl Database {
         }
 
         return Ok(total);
+    }
+
+    pub(crate) fn bitop(
+        &mut self,
+        op: &BitOperation,
+        dest_key: &str,
+        src_lhs_key: &str,
+        src_rhs_key: &str,
+    ) -> Result<usize, String> {
+        self.assert_single_value(dest_key)?;
+
+        let lhs_bytes = if self.dict.contains_key(src_lhs_key) {
+            self.assert_single_value(src_lhs_key)?;
+            self.dict
+                .get(src_lhs_key)
+                .and_then(|entry| {
+                    let Entry::Value(entry) = entry else {
+                        unreachable!();
+                    };
+
+                    Some(entry.value.clone())
+                })
+                .unwrap()
+        } else {
+            vec![]
+        };
+
+        let rhs_bytes = if self.dict.contains_key(src_rhs_key) {
+            self.assert_single_value(src_rhs_key)?;
+            self.dict
+                .get(src_rhs_key)
+                .and_then(|entry| {
+                    let Entry::Value(entry) = entry else {
+                        unreachable!();
+                    };
+
+                    Some(entry.value.clone())
+                })
+                .unwrap()
+        } else {
+            vec![]
+        };
+
+        let mut result = vec![];
+        for i in 0..lhs_bytes.len().max(rhs_bytes.len()) {
+            let lhs_byte = if i < lhs_bytes.len() { lhs_bytes[i] } else { 0 };
+            let rhs_byte = if i < rhs_bytes.len() { rhs_bytes[i] } else { 0 };
+            result.push(match op {
+                BitOperation::And => lhs_byte & rhs_byte,
+                BitOperation::Or => lhs_byte | rhs_byte,
+            });
+        }
+
+        let result_bytes_len = result.len();
+        if !result.is_empty() {
+            let entry = self
+                .dict
+                .entry(dest_key.to_string())
+                .or_insert(Entry::Value(ValueEntry::default()));
+
+            match entry {
+                Entry::Value(value_entry) => value_entry.value = result,
+                _ => unreachable!(),
+            }
+        }
+
+        return Ok(result_bytes_len);
     }
 
     pub(crate) fn push_to_array(

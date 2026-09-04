@@ -1,7 +1,30 @@
 use crate::{
-    common::{KeyValuePair, RangeStreamEntryID, StreamEntryID},
+    common::{Error, KeyValuePair, RangeStreamEntryID, StreamEntryID},
     resp::RespValue,
 };
+
+#[derive(Debug, Clone)]
+pub(crate) enum BitOperation {
+    And,
+    Or,
+}
+
+impl BitOperation {
+    pub(crate) fn parse_from(raw: &str) -> Result<Self, String> {
+        match raw.to_lowercase().as_str() {
+            "and" => Ok(Self::And),
+            "or" => Ok(Self::Or),
+            _ => Err("Cannot parse bit operation.".into()),
+        }
+    }
+
+    fn to_string(&self) -> String {
+        match self {
+            Self::And => String::from("AND"),
+            Self::Or => String::from("OR"),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub(crate) enum Command {
@@ -90,6 +113,12 @@ pub(crate) enum Command {
     Strlen {
         key: String,
     },
+    Bitop {
+        op: BitOperation,
+        dest_key: String,
+        src_lhs_key: String,
+        src_rhs_key: String,
+    },
     // ---
     Unknown(String),
 }
@@ -165,6 +194,7 @@ impl Command {
             Command::Zadd(_, _) => true,
             Command::Geoadd(_, _) => true,
             Command::Setbit { .. } => true,
+            Command::Bitop { .. } => true,
             // ---
             Command::Blpop(_, _) => false,
             Command::Brpop(_, _) => false,
@@ -263,6 +293,7 @@ impl Command {
             Command::Getbit { .. } => "getbit",
             Command::Strlen { .. } => "strlen",
             Command::Bitcount { .. } => "bitcount",
+            Command::Bitop { .. } => "bitop",
         }
     }
 
@@ -392,6 +423,23 @@ impl Command {
                     RespValue::BulkString(key.clone()),
                     RespValue::BulkString(bit.to_string()),
                     RespValue::BulkString(value.to_string()),
+                ];
+
+                RespValue::Array(params)
+            }
+
+            Command::Bitop {
+                op,
+                dest_key,
+                src_lhs_key,
+                src_rhs_key,
+            } => {
+                let params = vec![
+                    RespValue::BulkString("BITOP".into()),
+                    RespValue::BulkString(op.to_string()),
+                    RespValue::BulkString(dest_key.to_string()),
+                    RespValue::BulkString(src_lhs_key.to_string()),
+                    RespValue::BulkString(src_rhs_key.to_string()),
                 ];
 
                 RespValue::Array(params)

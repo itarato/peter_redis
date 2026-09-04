@@ -463,6 +463,18 @@ impl Engine {
                 self.db.read().await.bitcount(key, *start_byte, *end_byte)? as i64
             ),
 
+            Command::Bitop {
+                op,
+                dest_key,
+                src_lhs_key,
+                src_rhs_key,
+            } => RespValue::Integer(self.db.write().await.bitop(
+                op,
+                dest_key,
+                src_lhs_key,
+                src_rhs_key,
+            )? as i64),
+
             Command::Lrange(key, start, end) => {
                 match self.db.read().await.get_list_lrange(key, *start, *end) {
                     Ok(array) => RespValue::Array(
