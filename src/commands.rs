@@ -1,5 +1,5 @@
 use crate::{
-    common::{Error, KeyValuePair, RangeStreamEntryID, StreamEntryID},
+    common::{KeyValuePair, RangeStreamEntryID, StreamEntryID},
     resp::RespValue,
 };
 
