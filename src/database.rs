@@ -23,17 +23,25 @@ fn resolve_end_index(end: i64, len: usize) -> usize {
 }
 
 struct ValueEntry {
-    // TODO: Make this a Vec<u8>.
-    value: String,
+    value: Vec<u8>,
     expiry_timestamp_ms: Option<u128>,
 }
 
 impl ValueEntry {
     fn new() -> Self {
         Self {
-            value: String::new(),
+            value: vec![],
             expiry_timestamp_ms: None,
         }
+    }
+
+    pub(crate) fn to_string(&self) -> Result<String, String> {
+        String::from_utf8(self.value.clone())
+            .map_err(|_| "Cannot convert bytes to valid string".to_string())
+    }
+
+    pub(crate) fn set_from_str(&mut self, s: &str) {
+        self.value = s.as_bytes().to_vec();
     }
 }
 
@@ -126,20 +134,20 @@ impl Database {
             .entry(key)
             .and_modify(|entry| match entry {
                 Entry::Value(value_entry) => {
-                    value_entry.value = value.clone();
+                    value_entry.set_from_str(&value);
                     value_entry.expiry_timestamp_ms = expiry_ms;
                 }
                 _ => unreachable!(),
             })
             .or_insert(Entry::Value(ValueEntry {
-                value,
+                value: value.into_bytes(),
                 expiry_timestamp_ms: expiry_ms,
             }));
 
         Ok(())
     }
 
-    pub(crate) fn get(&self, key: &String) -> Result<Option<&String>, String> {
+    pub(crate) fn get(&self, key: &String) -> Result<Option<String>, String> {
         self.assert_single_value(key)?;
 
         Ok(self.dict.get(key).and_then(|entry| {
@@ -149,12 +157,12 @@ impl Database {
 
             if let Some(expiry_timestamp_ms) = value_entry.expiry_timestamp_ms {
                 if expiry_timestamp_ms >= current_time_ms() {
-                    Some(&value_entry.value)
+                    Some(value_entry.to_string().ok()?)
                 } else {
                     None
                 }
             } else {
-                Some(&value_entry.value)
+                Some(value_entry.to_string().ok()?)
             }
         }))
     }
@@ -181,18 +189,15 @@ impl Database {
 
         let u8_index = bit / 8;
         while entry.value.len() <= u8_index {
-            entry.value.push('\0');
+            entry.value.push(0);
         }
 
         let bit_i = 7 - (bit % 8);
-        let old_u8 = entry.value.as_bytes()[u8_index];
+        let old_u8 = entry.value[u8_index];
         let old_value = (old_u8 >> bit_i) & 1;
 
-        entry.value.replace_range(
-            u8_index..=u8_index,
-            &(((old_u8 & !((1u8 << bit_i) as u8)) | ((value as u8) << (bit_i as u8))) as char)
-                .to_string(),
-        );
+        entry.value[u8_index] =
+            (old_u8 & !((1u8 << bit_i) as u8)) | ((value as u8) << (bit_i as u8));
 
         Ok(old_value as u8)
     }
@@ -222,7 +227,7 @@ impl Database {
         }
 
         let bit_i = 7 - (bit % 8);
-        let old_u8 = entry.value.as_bytes()[u8_index];
+        let old_u8 = entry.value[u8_index];
         let old_value = (old_u8 >> bit_i) & 1;
 
         Ok(old_value as u8)
@@ -275,7 +280,7 @@ impl Database {
             .unwrap();
 
         let mut total = 0;
-        for byte in &entry.value.as_bytes()[start_byte..=end_byte.min(entry.value.len() - 1)] {
+        for byte in &entry.value[start_byte..=end_byte.min(entry.value.len() - 1)] {
             total += bitcount(*byte);
         }
 
@@ -556,18 +561,18 @@ impl Database {
             self.dict
                 .entry(key.to_string())
                 .or_insert(Entry::Value(ValueEntry {
-                    value: "0".to_string(),
+                    value: vec![b'0'],
                     expiry_timestamp_ms: None,
                 }))
         else {
             unreachable!()
         };
 
-        let num = i64::from_str_radix(&value_entry.value, 10)
+        let num = i64::from_str_radix(&value_entry.to_string()?, 10)
             .map_err(|_| "ERR value is not an integer or out of range".to_string())?
             + 1;
 
-        value_entry.value = num.to_string();
+        value_entry.set_from_str(&num.to_string());
 
         Ok(num)
     }
