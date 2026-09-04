@@ -188,7 +188,8 @@ impl Database {
 
         entry.value.replace_range(
             u8_index..=u8_index,
-            &((old_u8 & !((1u8 << bit_i) as u8)) | ((value as u8) << (bit_i as u8))).to_string(),
+            &(((old_u8 & !((1u8 << bit_i) as u8)) | ((value as u8) << (bit_i as u8))) as char)
+                .to_string(),
         );
 
         Ok(old_value as u8)
