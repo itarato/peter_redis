@@ -82,6 +82,9 @@ pub(crate) enum Command {
     Auth(String /* User */, String /* Password */),
     Watch(Vec<String> /* Keys */),
     Unwatch,
+    Strlen {
+        key: String,
+    },
     // ---
     Unknown(String),
 }
@@ -196,6 +199,7 @@ impl Command {
             Command::Watch(_) => false,
             Command::Unwatch => false,
             Command::Getbit { .. } => false,
+            Command::Strlen { .. } => false,
         }
     }
 
@@ -251,6 +255,7 @@ impl Command {
             Command::Unwatch => "unwatch",
             Command::Setbit { .. } => "setbit",
             Command::Getbit { .. } => "getbit",
+            Command::Strlen { .. } => "strlen",
         }
     }
 

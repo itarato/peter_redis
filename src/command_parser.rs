@@ -647,6 +647,13 @@ impl CommandParser {
                         return Ok(Command::Getbit { key, bit });
                     }
 
+                    if name.to_lowercase() == "strlen" {
+                        Self::assert_argument_count(&items, 2, "strlen")?;
+                        let key = Self::get_string(&items[1], "strlen")?;
+
+                        return Ok(Command::Strlen { key });
+                    }
+
                     return Ok(Command::Unknown(name.to_lowercase()));
                 } else {
                     return Ok(Command::Unknown("not-a-string".to_string()));

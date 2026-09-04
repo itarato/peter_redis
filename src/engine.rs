@@ -453,6 +453,8 @@ impl Engine {
                 RespValue::Integer(value as i64)
             }
 
+            Command::Strlen { key } => RespValue::Integer(self.db.read().await.strlen(key)? as i64),
+
             Command::Lrange(key, start, end) => {
                 match self.db.read().await.get_list_lrange(key, *start, *end) {
                     Ok(array) => RespValue::Array(

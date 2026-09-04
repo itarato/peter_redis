@@ -22,6 +22,7 @@ fn resolve_end_index(end: i64, len: usize) -> usize {
 }
 
 struct ValueEntry {
+    // TODO: Make this a Vec<u8>.
     value: String,
     expiry_timestamp_ms: Option<u128>,
 }
@@ -182,7 +183,7 @@ impl Database {
             entry.value.push('\0');
         }
 
-        let bit_i = bit % 8;
+        let bit_i = 7 - (bit % 8);
         let old_u8 = entry.value.as_bytes()[u8_index];
         let old_value = (old_u8 >> bit_i) & 1;
 
@@ -219,11 +220,33 @@ impl Database {
             return Ok(0);
         }
 
-        let bit_i = bit % 8;
+        let bit_i = 7 - (bit % 8);
         let old_u8 = entry.value.as_bytes()[u8_index];
         let old_value = (old_u8 >> bit_i) & 1;
 
         Ok(old_value as u8)
+    }
+
+    pub(crate) fn strlen(&self, key: &str) -> Result<usize, String> {
+        if self.dict.contains_key(key) {
+            self.assert_single_value(key)?;
+        } else {
+            return Ok(0);
+        }
+
+        let entry = self
+            .dict
+            .get(key)
+            .and_then(|entry| {
+                let Entry::Value(entry) = entry else {
+                    unreachable!();
+                };
+
+                Some(entry)
+            })
+            .unwrap();
+
+        return Ok(entry.value.len());
     }
 
     pub(crate) fn push_to_array(
